@@ -236,3 +236,27 @@ def motivation_quote(recent_keys: list[str] | None = None) -> dict:
     import random
     q = random.choice(pool)
     return {"key": q["key"], "text": f"{q['ayah']}\n\n{q['note']}"}
+
+
+def prayer_hint(now: datetime | None = None, governorate: str = "بغداد", window_minutes: int = 15) -> str | None:
+    """Small backward-compatible helper used by break_engine.
+
+    Returns a short prayer hint if a prayer is close. Defaults to Baghdad when the
+    caller does not know the student's governorate, so older break logic keeps
+    working instead of crashing.
+    """
+    now = now or datetime.now(BAGHDAD_TZ)
+    try:
+        nxt = seconds_until_next_prayer(governorate, now)
+        if not nxt:
+            return None
+        key, seconds = nxt
+        if 0 <= seconds <= window_minutes * 60:
+            label = PRAYER_LABELS.get(key, key)
+            minutes = max(0, seconds // 60)
+            if minutes <= 1:
+                return f"{label} قريبة جدًا. اجعل الاستراحة للصلاة ثم ارجع للدراسة."
+            return f"باقي تقريبًا {minutes} دقيقة على {label}. رتّب جلستك حتى لا تتجاوز وقت الصلاة."
+    except Exception:
+        return None
+    return None
