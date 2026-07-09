@@ -3,16 +3,20 @@ from __future__ import annotations
 from telegram import Update
 from telegram.ext import ContextTypes
 from app.db import get_session
-from app.keyboards import confirm_back_keyboard, nav_keyboard
+from app.keyboards import confirm_back_keyboard, nav_keyboard, main_keyboard
 from app.repositories.users_repo import ensure_user, save_profile
 from app.utils import validate_triple_name, normalize_text, parse_health, classify_college
+
+
+def _msg(update: Update):
+    return update.effective_message or update.callback_query.message
 
 
 async def start_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data["flow"] = "onboarding"
     context.user_data["step"] = "name"
     context.user_data["onboarding"] = {}
-    await update.effective_message.reply_text(
+    await _msg(update).reply_text(
         "أهلًا بك في Study Commander Bot.\n\n"
         "أول خطوة: اكتب اسمك الثلاثي الحقيقي.\n"
         "مثال: أحمد علي حسن\n"
@@ -26,14 +30,17 @@ async def handle_onboarding_text(update: Update, context: ContextTypes.DEFAULT_T
     draft = context.user_data.setdefault("onboarding", {})
     msg = update.effective_message
 
-    if text == "↩️ خطوة للوراء":
+    if text in ["↩️ خطوة للوراء", "🔴 رجوع للتعديل"]:
         await _go_back(update, context)
+        return
+    if text == "🔵 تأكيد" and step == "review":
+        await confirm_onboarding_text(update, context)
         return
 
     if step == "name":
         ok, value = validate_triple_name(text)
         if not ok:
-            await msg.reply_text(f"❌ {value}")
+            await msg.reply_text(f"❌ {value}\nاكتب الاسم الثلاثي الحقيقي بدون رموز.")
             return
         draft["full_name"] = value
         context.user_data["step"] = "college"
@@ -82,10 +89,13 @@ async def handle_onboarding_text(update: Update, context: ContextTypes.DEFAULT_T
         await show_review(update, context)
         return
 
+    if step == "review":
+        await msg.reply_text("اضغط 🔵 تأكيد أو 🔴 رجوع للتعديل من لوحة الكيبورد.", reply_markup=confirm_back_keyboard())
+
 
 async def _go_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     step = context.user_data.get("step")
-    order = ["name", "college", "stage", "health"]
+    order = ["name", "college", "stage", "health", "review"]
     if step in order and order.index(step) > 0:
         context.user_data["step"] = order[order.index(step)-1]
     prompts = {
@@ -93,12 +103,14 @@ async def _go_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "college": "اكتب اسم الكلية.",
         "stage": "اكتب المرحلة.",
         "health": "اكتب العمر الطول الوزن أو تخطي.",
+        "review": "راجع معلوماتك ثم أكد.",
     }
-    await update.effective_message.reply_text(prompts.get(context.user_data.get("step"), "اكتب البيانات."))
+    await update.effective_message.reply_text(prompts.get(context.user_data.get("step"), "اكتب البيانات."), reply_markup=nav_keyboard())
 
 
 async def show_review(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     d = context.user_data.get("onboarding", {})
+    context.user_data["step"] = "review"
     text = (
         "راجع معلوماتك قبل التأكيد:\n\n"
         f"الاسم: {d.get('full_name')}\n"
@@ -108,17 +120,15 @@ async def show_review(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         f"العمر: {d.get('age') or 'اختياري/غير مضاف'}\n"
         f"الطول: {d.get('height_cm') or 'اختياري/غير مضاف'}\n"
         f"الوزن: {d.get('weight_kg') or 'اختياري/غير مضاف'}\n\n"
-        "إذا المعلومات صحيحة اضغط تأكيد."
+        "إذا المعلومات صحيحة اضغط 🔵 تأكيد."
     )
-    await update.effective_message.reply_text(text, reply_markup=confirm_back_keyboard("onboard:confirm", "onboard:back"))
+    await update.effective_message.reply_text(text, reply_markup=confirm_back_keyboard())
 
 
-async def confirm_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
+async def confirm_onboarding_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     draft = context.user_data.get("onboarding", {})
     with get_session() as db:
-        user = ensure_user(db, query.from_user)
+        user = ensure_user(db, update.effective_user)
         profile = save_profile(db, user, draft)
         if user.role == "admin":
             user.is_active = True
@@ -127,4 +137,9 @@ async def confirm_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE)
         else:
             active_text = "تم حفظ ملفك. حسابك بانتظار تفعيل الأدمن."
     context.user_data.clear()
-    await query.message.reply_text(f"✅ {active_text}\n\n{profile.specialty}")
+    await update.effective_message.reply_text(f"✅ {active_text}\n\n{profile.specialty}", reply_markup=main_keyboard(user.role == "admin"))
+
+
+# kept for compatibility if old inline callbacks arrive
+async def confirm_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await confirm_onboarding_text(update, context)
