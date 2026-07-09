@@ -5,10 +5,11 @@ from sqlalchemy import select, func
 from telegram import Update
 from telegram.ext import ContextTypes
 from app.db import get_session
-from app.models import User, PomodoroSession, FoodLog
+from app.models import User, PomodoroSession, FoodLog, PrayerSetting
 from app.keyboards import pomodoro_menu_keyboard, pomodoro_running_keyboard, nav_keyboard
 from app.services.break_engine import build_break_recommendation
 from app.services.calories import estimate_calories
+from app.services.prayer import seconds_until_next_prayer, PRAYER_LABELS
 
 
 def _current_user(db, tg_id: int) -> User | None:
@@ -95,14 +96,28 @@ async def start_pomodoro(message, context: ContextTypes.DEFAULT_TYPE, tg_id: int
         db.commit()
         db.refresh(session)
         sid = session.id
+        prayer_setting = db.scalar(select(PrayerSetting).where(PrayerSetting.user_id == user.id, PrayerSetting.enabled == True))  # noqa: E712
+        prayer_note = ""
+        effective_seconds = study_minutes * 60
+        if prayer_setting and prayer_setting.governorate:
+            nxt = seconds_until_next_prayer(prayer_setting.governorate)
+            if nxt:
+                prayer_key, seconds_left = nxt
+                if 60 < seconds_left < effective_seconds:
+                    effective_seconds = max(60, seconds_left - 60)
+                    prayer_note = f"\n🕌 تم ضبط الجلسة لتتوقف قبل دقيقة من {PRAYER_LABELS.get(prayer_key, 'الصلاة')} حسب محافظتك."
+                elif 0 <= seconds_left <= 60:
+                    effective_seconds = 60
+                    prayer_note = "\n🕌 وقت الصلاة قريب جدًا، سأجعل هذه الجلسة دقيقة ترتيب فقط ثم تتوقف."
     await message.reply_text(
         f"⏳ بدأت جلسة الدراسة.\n"
-        f"الدراسة: {study_minutes} دقيقة\nالراحة: {break_minutes} دقيقة\n\n"
+        f"الدراسة: {study_minutes} دقيقة\nالراحة: {break_minutes} دقيقة"
+        f"{prayer_note}\n\n"
         "استخدم زر ⌛ كم المتبقي؟ حتى تشوف الوقت بالثواني والتقدم.",
         reply_markup=pomodoro_running_keyboard(),
     )
     if context.job_queue:
-        context.job_queue.run_once(pomodoro_time_up, when=study_minutes*60, data={"chat_id": message.chat_id, "user_id": tg_id, "session_id": sid}, name=f"pomo_{sid}")
+        context.job_queue.run_once(pomodoro_time_up, when=effective_seconds, data={"chat_id": message.chat_id, "user_id": tg_id, "session_id": sid}, name=f"pomo_{sid}")
 
 
 async def show_remaining(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

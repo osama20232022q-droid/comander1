@@ -166,6 +166,36 @@ class BackupRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
+class PrayerSetting(Base):
+    __tablename__ = "prayer_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    governorate: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    include_ayah: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_sent_fajr: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    last_sent_dhuhr_asr: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    last_sent_maghrib_isha: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class PrayerTimeCache(Base):
+    __tablename__ = "prayer_time_cache"
+    __table_args__ = (UniqueConstraint("governorate", "date_key", name="uq_prayer_governorate_date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    governorate: Mapped[str] = mapped_column(String(100), nullable=False)
+    date_key: Mapped[str] = mapped_column(String(20), nullable=False)
+    fajr: Mapped[str] = mapped_column(String(10), nullable=False)
+    dhuhr: Mapped[str] = mapped_column(String(10), nullable=False)
+    maghrib: Mapped[str] = mapped_column(String(10), nullable=False)
+    source: Mapped[str] = mapped_column(String(80), default="fallback", nullable=False)
+    raw_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
 class ButtonConfig(Base):
     __tablename__ = "button_configs"
 

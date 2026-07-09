@@ -18,6 +18,7 @@ from app.handlers.subjects import (
 from app.handlers.plans import start_plan_flow, handle_plan_text, handle_plan_callback
 from app.handlers.pomodoro import show_pomodoro, handle_pomodoro_text, handle_custom_pomo, handle_food_log, show_remaining
 from app.handlers.motivation import motivate
+from app.handlers.prayer_reminders import handle_prayer_text, show_prayer_menu, prayer_notifier_job
 from app.handlers.progress import show_progress, show_profile
 from app.handlers.certificates import show_certificates, handle_certificate_text, handle_cert_callback
 from app.handlers.admin import show_admin_panel, handle_admin_callback, is_admin_tg, handle_restore_file, handle_admin_text
@@ -151,6 +152,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if flow == "food_log":
         await handle_food_log(update, context, text)
         return
+    if flow == "prayer_choose_governorate":
+        if await handle_prayer_text(update, context, text):
+            return
     if flow == "restore_backup":
         await update.effective_message.reply_text("أرسل ملف JSON كوثيقة، وليس نصًا.")
         return
@@ -187,6 +191,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
     elif main_action == "motivate" or text == "🔥 حفزني":
         await motivate(update, context)
+    elif main_action == "prayer_reminders" or text == "🕌 أذكار الصلاة":
+        await show_prayer_menu(update, context)
+    elif await handle_prayer_text(update, context, text):
+        return
     elif main_action == "progress" or text == "📊 تقدمي":
         await show_progress(update, context)
     elif main_action == "certificates" or text == "🏅 شهاداتي":
@@ -272,6 +280,7 @@ async def configure_bot_profile(app: Application) -> None:
         BotCommand("menu", "القائمة الرئيسية"),
         BotCommand("help", "ماذا يفعل هذا البوت؟"),
         BotCommand("remaining", "عرض الوقت المتبقي للبومودورو"),
+        BotCommand("prayer", "أذكار الصلاة وتذكيرات الأوقات"),
         BotCommand("profile", "عرض ملفي"),
         BotCommand("admin", "لوحة الأدمن"),
     ]
@@ -304,13 +313,16 @@ async def main() -> None:
     app.add_handler(CommandHandler("menu", go_home))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("remaining", show_remaining))
+    app.add_handler(CommandHandler("prayer", show_prayer_menu))
     app.add_handler(CommandHandler("profile", show_profile))
     app.add_handler(CommandHandler("admin", show_admin_panel))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler((filters.Document.ALL | filters.PHOTO | filters.AUDIO | filters.VIDEO) & ~filters.COMMAND, handle_files))
     app.add_error_handler(error_handler)
-    log.info("Study Commander Bot v5 admin buttons started")
+    if app.job_queue:
+        app.job_queue.run_repeating(prayer_notifier_job, interval=60, first=20, name="prayer_notifier")
+    log.info("Study Commander Bot v6 prayer reminders patch started")
     await app.initialize()
     await configure_bot_profile(app)
     await app.start()

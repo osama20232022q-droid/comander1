@@ -34,11 +34,12 @@ DEFAULT_BUTTONS: list[dict] = [
     {"action_key": "pomodoro", "label": "⏳ البومودورو", "scope": "main", "button_type": "reply", "row_order": 2, "col_order": 1, "style": "default"},
     {"action_key": "remaining", "label": "⌛ كم المتبقي؟", "scope": "main", "button_type": "reply", "row_order": 2, "col_order": 2, "style": "primary"},
     {"action_key": "motivate", "label": "🔥 حفزني", "scope": "main", "button_type": "reply", "row_order": 3, "col_order": 1, "style": "default"},
-    {"action_key": "progress", "label": "📊 تقدمي", "scope": "main", "button_type": "reply", "row_order": 3, "col_order": 2, "style": "default"},
-    {"action_key": "certificates", "label": "🏅 شهاداتي", "scope": "main", "button_type": "reply", "row_order": 4, "col_order": 1, "style": "default"},
-    {"action_key": "profile", "label": "👤 ملفي", "scope": "main", "button_type": "reply", "row_order": 4, "col_order": 2, "style": "default"},
-    {"action_key": "inline_buttons", "label": "🔘 الأزرار الشفافة", "scope": "main", "button_type": "reply", "row_order": 5, "col_order": 1, "style": "default"},
-    {"action_key": "help", "label": "❓ ماذا يفعل هذا البوت؟", "scope": "main", "button_type": "reply", "row_order": 5, "col_order": 2, "style": "default"},
+    {"action_key": "prayer_reminders", "label": "🕌 أذكار الصلاة", "scope": "main", "button_type": "reply", "row_order": 3, "col_order": 2, "style": "success"},
+    {"action_key": "progress", "label": "📊 تقدمي", "scope": "main", "button_type": "reply", "row_order": 4, "col_order": 1, "style": "default"},
+    {"action_key": "certificates", "label": "🏅 شهاداتي", "scope": "main", "button_type": "reply", "row_order": 4, "col_order": 2, "style": "default"},
+    {"action_key": "profile", "label": "👤 ملفي", "scope": "main", "button_type": "reply", "row_order": 5, "col_order": 1, "style": "default"},
+    {"action_key": "inline_buttons", "label": "🔘 الأزرار الشفافة", "scope": "main", "button_type": "reply", "row_order": 5, "col_order": 2, "style": "default"},
+    {"action_key": "help", "label": "❓ ماذا يفعل هذا البوت؟", "scope": "main", "button_type": "reply", "row_order": 6, "col_order": 1, "style": "default"},
     {"action_key": "admin_panel", "label": "👑 لوحة الأدمن", "scope": "admin_entry", "button_type": "reply", "row_order": 99, "col_order": 1, "style": "danger"},
 
     # Admin panel
