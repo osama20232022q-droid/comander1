@@ -1,0 +1,10 @@
+services:
+  study-commander-bot:
+    build: .
+    container_name: study-commander-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./storage:/app/storage
