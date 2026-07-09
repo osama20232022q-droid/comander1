@@ -1,115 +1,98 @@
-# Study Commander Bot
+# Study Commander Bot V3
 
-Telegram study-command bot for medical students: planning, lecture analysis, Pomodoro, food/water, sleep routine, discipline reports, weekly certificates, admin subscriptions, and fast demo testing.
+بوت Telegram احترافي لإدارة دراسة الطلاب: مواد، ملحقات، أسئلة سنوات، خطة دراسية معمقة، بومودورو ذكي، شهادات تقدير، تقدم، وتحفيز.
 
-## Main features
+## أهم قرار في V3
 
-- Telegram reply-keyboard UX with Arabic/Iraqi strict command style.
-- Private multi-user data isolation.
-- Subscription gate: students cannot use the bot until the admin activates a paid plan.
-- Admin panel only for `ADMIN_IDS`.
-- Plans supported from admin panel:
-  - 7-day trial
-  - monthly
-  - 3 months
-  - 6 months
-  - yearly
-- Block/unblock users.
-- Add subjects and lectures.
-- Upload PDF lectures and analyze:
-  - pages
-  - word density
-  - image/list score
-  - difficulty
-  - expected study time
-  - exam-risk notes
-- Pomodoro presets: 25/5, 50/10, 90/15.
-- Timer notifications.
-- Focus score after sessions.
-- Food and water logging with approximate Iraqi-food calories.
-- Sleep logging and routine experiments.
-- Rescue-day mode.
-- Daily reports and Discipline Score.
-- Weekly one-page HTML certificates.
-- Student evaluation table after demo/certificate usage.
-- `🧪 تجربة الخدمات`: instantly creates safe demo data so you can test all bot services without waiting a week.
-- Iraq timezone support: `Asia/Baghdad`.
+هذه النسخة صممت حتى لا تحتاج تخزين ملفات ضخم داخل السيرفر:
 
-## Railway deployment
+- بيانات المستخدمين تحفظ في قاعدة بيانات.
+- الملفات التي يرفعها الطالب تحفظ كـ Telegram `file_id` داخل قاعدة البيانات، فيمكن للبوت إعادة إرسالها لاحقًا بدون تخزين PDF/صور/فيديو داخل السيرفر.
+- النسخ الاحتياطي يظهر للأدمن فقط.
 
-1. Create a Telegram bot with `@BotFather` and copy the token.
-2. Push this project to GitHub.
-3. In Railway:
-   - New Project -> Deploy from GitHub repo.
-   - Add environment variables:
-     - `BOT_TOKEN`
-     - `ADMIN_IDS` = your Telegram numeric ID
-     - `TIMEZONE=Asia/Baghdad`
-     - Optional: `OPENAI_API_KEY`
-4. Recommended for persistent SQLite:
-   - Add a Railway Volume mounted at `/data`
-   - Set:
-     - `DATABASE_PATH=/data/study_commander.sqlite3`
-     - `UPLOADS_DIR=/data/uploads`
-     - `CERTIFICATES_DIR=/data/certificates`
-5. Deploy.
+## التشغيل على Railway
 
-This bot uses Telegram long polling, so it does not need a public webhook or HTTP port.
+### 1. ارفع محتويات هذا المجلد إلى GitHub
+يجب أن يظهر في جذر المستودع:
 
-## Local run
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-# edit .env
-python run.py
+```text
+app/
+assets/
+run.py
+requirements.txt
+Dockerfile
+Procfile
+railway.json
+.env.example
+README.md
 ```
 
-## Admin flow
+### 2. متغيرات Railway
 
-1. Start the bot from your Telegram account.
-2. Open `🧑‍✈️ الأدمن`.
-3. Click `🔐 تفعيل اشتراك`.
-4. Enter student Telegram numeric ID or username.
-5. Select plan.
-6. Confirm `✅ دفع`.
-7. The student gets full access until the subscription expires.
+```env
+BOT_TOKEN=توكن_البوت_من_BotFather
+ADMIN_IDS=ايديك_الرقمي_بتليجرام
+TIMEZONE=Asia/Baghdad
+BOT_SIGNATURE=Study Commander Bot
+```
 
-If the student has not opened the bot yet, you can activate by numeric ID. When they later press `/start`, their subscription will be recognized.
+### 3. قاعدة البيانات
 
-## Test all services immediately
+الأفضل حتى لا تضيع بيانات الطلاب عند تغيير السيرفر:
 
-From your admin account:
-1. Press `🧪 تجربة الخدمات`.
-2. Press `🧪 تشغيل تجربة كاملة`.
+```env
+DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST:PORT/DBNAME?sslmode=require
+```
 
-The bot creates demo-only data under your account:
-- subject
-- lecture analysis
-- study sessions
-- food and water
-- discipline event
-- routine experiment
-- report
-- certificate
-- student evaluation
+يمكنك استخدام أي PostgreSQL خارجي مجاني/مناسب لك. إذا تركت `DATABASE_URL` فارغًا سيستخدم SQLite:
 
-Then inspect the regular sections.
+```env
+DATABASE_PATH=/data/study_commander.sqlite3
+```
 
-## Important safety notes
+إذا استخدمت SQLite على Railway، اربط Volume على `/data`.
 
-- Food calories are approximate estimates, not medical or nutrition advice.
-- Penalties are non-harmful: no sleep deprivation, no food restriction, no unsafe behavior.
-- The bot records execution and habits; it does not diagnose mental or physical health conditions.
-- SQLite is fine for a first production version. For large paid use, migrate to PostgreSQL.
+## ميزات الواجهة
 
-## Suggested next upgrades
+### أول دخول الطالب
+- يطلب الاسم الثلاثي مع تدقيق.
+- يسأل عن الكلية.
+- يحلل التخصص.
+- يسأل عن المرحلة.
+- يسأل اختياريًا عن العمر/الطول/الوزن.
+- يعرض مراجعة ثم تأكيد.
+- بعدها ينتظر تفعيل الأدمن.
 
-- PostgreSQL adapter.
-- Exact prayer-time API by city.
-- PDF certificate export in addition to HTML.
-- Web admin dashboard.
-- Practical-slide image analysis.
-- Spaced repetition calendar.
+### الطالب المشترك/المفعل
+يرى:
+- 📚 المواد
+- 🧠 خطة دراسية معمقة
+- ⏳ البومودورو
+- 🔥 حفزني
+- 📊 تقدمي
+- 🏅 شهاداتي
+- 👤 ملفي
+
+### الأدمن فقط
+يرى:
+- 👑 لوحة الأدمن
+- تفعيل المستخدمين
+- الحظر
+- النسخ الاحتياطي
+- حالة قاعدة البيانات
+
+## النسخ الاحتياطي
+من لوحة الأدمن:
+
+- 📦 نسخة احتياطية الآن
+
+البوت يرسل لك ملف JSON يحتوي بيانات الجداول. حمّله واحتفظ به خارج Railway.
+
+## ملف التحفيز
+تم وضع ملف `assets/motivation/quotes.json` برسائل تحفيزية قصيرة. يمكن لاحقًا إضافة مستورد خاص لملف PDF التحفيزي، لكن لا ننشر الكتاب كاملًا داخل الكود حمايةً للحقوق.
+
+## ملاحظات مهمة
+
+- Telegram لا يدعم تغيير لون أزرار البوت فعليًا؛ تم استخدام رموز 🔵 و🔴 للدلالة على التأكيد والرجوع.
+- النصائح الصحية داخل البومودورو عامة وغير تشخيصية.
+- أوقات الصلاة الحالية Soft hints قابلة للربط لاحقًا بمصدر صلاة دقيق أو إدخال يدوي.

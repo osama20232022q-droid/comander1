@@ -3,9 +3,7 @@ __pycache__/
 *.pyc
 *.sqlite3
 *.db
-storage/uploads/*
-!storage/uploads/.gitkeep
-storage/certificates/*
-!storage/certificates/.gitkeep
+/data/*.sqlite3
+/backups/*.json
+*.log
 .DS_Store
-.venv/

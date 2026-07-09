@@ -1,208 +1,154 @@
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 from datetime import datetime
-
-from aiogram import Router, F
-from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
-
+from sqlalchemy import select, func
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes
 from app.config import settings
-from app.keyboards import admin_keyboard, back_keyboard, paid_confirmation_keyboard, subscription_plan_keyboard
-from app.services.access_service import admin_stats, grant_subscription, list_users_with_subscriptions, revoke_subscription
-from app.services.user_service import block_user, resolve_user, upsert_user
-from app.states import AdminStates
+from app.db import get_session, DATABASE_URL
+from app.models import User, StudentProfile, Subject, Attachment, BackupRecord
+from app.keyboards import admin_keyboard
+from app.repositories.users_repo import activate_user, ban_user
+from app.services.backup import export_database_to_json
 
-router = Router()
 
-
-def _is_admin(tg_id: int) -> bool:
+def is_admin_tg(tg_id: int) -> bool:
     return tg_id in settings.admin_ids
 
 
-def _require_admin(message: Message) -> bool:
-    return bool(message.from_user and _is_admin(message.from_user.id))
-
-
-@router.message(F.text == '🧑‍✈️ الأدمن')
-async def admin_home(message: Message) -> None:
-    await upsert_user(message.from_user)
-    if not _require_admin(message):
-        await message.answer('هذه اللوحة للمدير فقط.')
+async def show_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_admin_tg(update.effective_user.id):
         return
-    stats = await admin_stats()
-    await message.answer(
-        '🧑‍✈️ Admin Panel\n'
-        f'- المستخدمون: {stats["users"]}\n'
-        f'- الاشتراكات الفعالة: {stats["active_subscriptions"]}\n'
-        f'- الاشتراكات المنتهية: {stats["expired_subscriptions"]}\n'
-        f'- طلبات الاشتراك المعلقة: {stats["pending_requests"]}\n'
-        f'- المحظورون: {stats["blocked"]}\n\n'
-        'اختر أمرًا من لوحة الأدمن.',
-        reply_markup=admin_keyboard(),
-    )
+    await update.effective_message.reply_text("👑 لوحة الأدمن\nالأزرار أدناه تظهر لك فقط.", reply_markup=admin_keyboard())
 
 
-@router.message(F.text == '📊 إحصائيات الأدمن')
-async def admin_statistics(message: Message) -> None:
-    if not _require_admin(message):
+async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, data: str) -> None:
+    q = update.callback_query
+    if not is_admin_tg(q.from_user.id):
+        await q.answer("غير مصرح", show_alert=True)
         return
-    stats = await admin_stats()
-    await message.answer(
-        '📊 إحصائيات النظام:\n'
-        f'- كل المستخدمين: {stats["users"]}\n'
-        f'- فعالون باشتراك: {stats["active_subscriptions"]}\n'
-        f'- منتهية اشتراكاتهم: {stats["expired_subscriptions"]}\n'
-        f'- طلبات اشتراك معلقة: {stats["pending_requests"]}\n'
-        f'- محظورون: {stats["blocked"]}'
-    )
+    await q.answer()
+    if data == "admin:pending":
+        await pending_users(update, context)
+    elif data == "admin:users":
+        await list_users(update, context)
+    elif data.startswith("admin:activate:"):
+        _, _, uid, days = data.split(":")
+        await activate(update, context, int(uid), None if days == "none" else int(days))
+    elif data.startswith("admin:ban:"):
+        await ban(update, context, int(data.split(":")[-1]), True)
+    elif data.startswith("admin:unban:"):
+        await ban(update, context, int(data.split(":")[-1]), False)
+    elif data == "admin:backup":
+        await backup_now(update, context)
+    elif data == "admin:restore":
+        context.user_data["flow"] = "restore_backup"
+        await q.message.reply_text("أرسل ملف backup JSON الآن. ملاحظة: الاسترجاع الكامل يحتاج مراجعة قبل التشغيل بالإنتاج؛ هذه النسخة تحفظ الملف وتفحصه ولا تستبدل البيانات تلقائيًا حمايةً لك.")
+    elif data == "admin:db_status":
+        await db_status(update, context)
 
 
-@router.message(F.text == '🔐 تفعيل اشتراك')
-async def sub_start(message: Message, state: FSMContext) -> None:
-    if not _require_admin(message):
+async def pending_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    with get_session() as db:
+        users = db.scalars(select(User).where(User.is_active == False, User.role != "admin").order_by(User.created_at.desc()).limit(10)).all()
+    if not users:
+        await q.message.reply_text("لا توجد طلبات تفعيل.")
         return
-    await state.set_state(AdminStates.waiting_sub_identifier)
-    await message.answer(
-        'اكتب Telegram ID الرقمي أو username للطالب.\n'
-        'إذا الطالب لم يدخل للبوت بعد، استخدم رقمه فقط حتى ينفتح له عند أول /start.',
-        reply_markup=back_keyboard(),
-    )
+    for u in users:
+        name = u.profile.full_name if u.profile else (u.first_name or "بدون ملف")
+        rows = [
+            [InlineKeyboardButton("تفعيل 30 يوم", callback_data=f"admin:activate:{u.id}:30"), InlineKeyboardButton("تفعيل دائم", callback_data=f"admin:activate:{u.id}:none")],
+            [InlineKeyboardButton("حظر", callback_data=f"admin:ban:{u.id}")],
+        ]
+        await q.message.reply_text(f"طلب تفعيل\nID: {u.id}\nTelegram: {u.telegram_id}\nالاسم: {name}\nUsername: @{u.username or '-'}", reply_markup=InlineKeyboardMarkup(rows))
 
 
-@router.message(AdminStates.waiting_sub_identifier)
-async def sub_identifier(message: Message, state: FSMContext) -> None:
-    if not _require_admin(message):
-        return
-    ident = message.text.strip()
-    target = await resolve_user(ident, created_by_admin_id=message.from_user.id)
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    with get_session() as db:
+        users = db.scalars(select(User).order_by(User.created_at.desc()).limit(20)).all()
+    lines = ["📋 آخر المستخدمين:"]
+    for u in users:
+        name = u.profile.full_name if u.profile else (u.first_name or "-")
+        status = "✅" if u.is_active else "⏳"
+        ban = "🚫" if u.is_banned else ""
+        lines.append(f"{status}{ban} #{u.id} — {name} — {u.telegram_id}")
+    await q.message.reply_text("\n".join(lines))
+
+
+async def activate(update: Update, context: ContextTypes.DEFAULT_TYPE, uid: int, days: int | None) -> None:
+    q = update.callback_query
+    with get_session() as db:
+        admin = db.scalar(select(User).where(User.telegram_id == q.from_user.id))
+        target = activate_user(db, admin, uid, days)
     if not target:
-        await message.answer('لم أجد المستخدم. إذا تريد إضافة شخص جديد استخدم Telegram numeric ID فقط.')
+        await q.message.reply_text("المستخدم غير موجود.")
         return
-    await state.update_data(identifier=ident, target_tg_id=target['tg_id'], target_name=target.get('full_name') or target.get('username') or str(target['tg_id']))
-    await state.set_state(AdminStates.waiting_sub_plan)
-    await message.answer(
-        f'المستخدم: {target.get("full_name") or "-"} | @{target.get("username") or "-"} | <code>{target["tg_id"]}</code>\n'
-        'اختر مدة الاشتراك:',
-        reply_markup=subscription_plan_keyboard(),
+    await q.message.reply_text("✅ تم التفعيل.")
+    try:
+        await context.bot.send_message(target.telegram_id, "✅ تم تفعيل حسابك. أرسل /start لفتح الواجهة الرئيسية.")
+    except Exception:
+        pass
+
+
+async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE, uid: int, banned: bool) -> None:
+    q = update.callback_query
+    with get_session() as db:
+        admin = db.scalar(select(User).where(User.telegram_id == q.from_user.id))
+        target = ban_user(db, admin, uid, banned)
+    await q.message.reply_text("تم تحديث الحظر." if target else "المستخدم غير موجود.")
+
+
+async def backup_now(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = Path(tempfile.gettempdir()) / f"study_commander_backup_{ts}.json"
+    try:
+        export_database_to_json(path)
+        with get_session() as db:
+            admin = db.scalar(select(User).where(User.telegram_id == q.from_user.id))
+            db.add(BackupRecord(admin_user_id=admin.id, file_name=path.name, status="created", details="telegram_export"))
+            db.commit()
+        await q.message.reply_document(path.open("rb"), filename=path.name, caption="📦 نسخة احتياطية JSON. حمّلها واحتفظ بها. هذا الزر أدمن فقط.")
+    except Exception as e:
+        await q.message.reply_text(f"فشل إنشاء النسخة الاحتياطية: {e}")
+
+
+async def db_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    q = update.callback_query
+    with get_session() as db:
+        users = db.scalar(select(func.count()).select_from(User)) or 0
+        subjects = db.scalar(select(func.count()).select_from(Subject)) or 0
+        files = db.scalar(select(func.count()).select_from(Attachment)) or 0
+    provider = "PostgreSQL خارجي" if DATABASE_URL.startswith("postgres") else "SQLite محلي/Volume"
+    await q.message.reply_text(
+        f"☁️ حالة قاعدة البيانات\n\nProvider: {provider}\nUsers: {users}\nSubjects: {subjects}\nFiles refs: {files}\n\n"
+        "ملاحظة: الملفات نفسها مخزنة كـ Telegram file_id، لذلك لا نحتاج مساحة سيرفر كبيرة للملحقات."
     )
 
 
-@router.message(AdminStates.waiting_sub_plan)
-async def sub_plan(message: Message, state: FSMContext) -> None:
-    if not _require_admin(message):
+async def handle_restore_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_admin_tg(update.effective_user.id):
         return
-    plan = message.text.strip()
-    if plan not in {'شهري', '٣ أشهر', '٦ أشهر', 'سنوي', '٧ أيام تجربة'}:
-        await message.answer('اختر مدة من الأزرار فقط.')
+    doc = update.effective_message.document
+    if not doc:
+        await update.effective_message.reply_text("أرسل ملف JSON فقط.")
         return
-    await state.update_data(plan=plan)
-    await state.set_state(AdminStates.waiting_sub_paid)
-    data = await state.get_data()
-    await message.answer(
-        f'تأكيد الدفع:\n'
-        f'- الطالب: {data["target_name"]}\n'
-        f'- المدة: {plan}\n\n'
-        'هل الطالب دفع؟ إذا نعم يفتح البوت فورًا.',
-        reply_markup=paid_confirmation_keyboard(),
-    )
-
-
-@router.message(AdminStates.waiting_sub_paid)
-async def sub_paid(message: Message, state: FSMContext) -> None:
-    if not _require_admin(message):
-        return
-    data = await state.get_data()
-    if message.text == '❌ لم يدفع':
-        await state.clear()
-        await message.answer('لم يتم فتح الاشتراك. الحساب يبقى مقفلًا.', reply_markup=admin_keyboard())
-        return
-    if message.text != '✅ دفع':
-        await message.answer('اختر: ✅ دفع أو ❌ لم يدفع.')
-        return
-
-    result = await grant_subscription(
-        data['identifier'],
-        data['plan'],
-        created_by_tg_id=message.from_user.id,
-        paid=True,
-        note='Activated from admin panel after payment confirmation',
-    )
-    await state.clear()
-    if not result:
-        await message.answer('فشل التفعيل: لم أجد المستخدم.', reply_markup=admin_keyboard())
-        return
-    end: datetime = result['end']
-    await message.answer(
-        '✅ تم فتح الاشتراك.\n'
-        f'- الطالب: {result["user"].get("full_name") or result["user"]["tg_id"]}\n'
-        f'- الخطة: {data["plan"]}\n'
-        f'- ينتهي: {end.strftime("%Y-%m-%d %H:%M")}\n\n'
-        'من الآن يقدر يستخدم كل خدمات البوت.',
-        reply_markup=admin_keyboard(),
-    )
-
-
-@router.message(F.text == '⛔️ إيقاف اشتراك')
-async def revoke_start(message: Message, state: FSMContext) -> None:
-    if not _require_admin(message):
-        return
-    await state.set_state(AdminStates.waiting_revoke_identifier)
-    await message.answer('اكتب Telegram ID أو username لإيقاف اشتراكه.', reply_markup=back_keyboard())
-
-
-@router.message(AdminStates.waiting_revoke_identifier)
-async def revoke_done(message: Message, state: FSMContext) -> None:
-    if not _require_admin(message):
-        return
-    ok = await revoke_subscription(message.text.strip())
-    await state.clear()
-    await message.answer('تم إيقاف الاشتراك.' if ok else 'لم أجد المستخدم.', reply_markup=admin_keyboard())
-
-
-@router.message(F.text == 'حظر')
-async def block_start(message: Message, state: FSMContext) -> None:
-    if not _require_admin(message):
-        return
-    await state.set_state(AdminStates.waiting_block_identifier)
-    await message.answer('اكتب Telegram ID أو username للحظر.', reply_markup=back_keyboard())
-
-
-@router.message(AdminStates.waiting_block_identifier)
-async def block_done(message: Message, state: FSMContext) -> None:
-    if not _require_admin(message):
-        return
-    ok = await block_user(message.text.strip(), True)
-    await state.clear()
-    await message.answer('تم الحظر.' if ok else 'لم أجد هذا المستخدم.', reply_markup=admin_keyboard())
-
-
-@router.message(F.text == 'إلغاء حظر')
-async def unblock_start(message: Message, state: FSMContext) -> None:
-    if not _require_admin(message):
-        return
-    await state.set_state(AdminStates.waiting_unblock_identifier)
-    await message.answer('اكتب Telegram ID أو username لإلغاء الحظر.', reply_markup=back_keyboard())
-
-
-@router.message(AdminStates.waiting_unblock_identifier)
-async def unblock_done(message: Message, state: FSMContext) -> None:
-    if not _require_admin(message):
-        return
-    ok = await block_user(message.text.strip(), False)
-    await state.clear()
-    await message.answer('تم إلغاء الحظر.' if ok else 'لم أجد هذا المستخدم.', reply_markup=admin_keyboard())
-
-
-@router.message(F.text == 'قائمة المستخدمين')
-async def user_list(message: Message) -> None:
-    if not _require_admin(message):
-        return
-    rows = await list_users_with_subscriptions(limit=30)
-    lines = ['آخر المستخدمين:']
-    for r in rows:
-        sub = 'ACTIVE' if r.get('sub_active') else 'LOCKED'
-        sub_end = r.get('sub_end') or '-'
-        lines.append(
-            f'- <code>{r["tg_id"]}</code> @{r["username"] or "-"} | {r["full_name"] or "-"} | {sub} | {r.get("sub_plan") or "-"} | {sub_end} | blocked={r["is_blocked"]}'
+    file = await context.bot.get_file(doc.file_id)
+    raw = await file.download_as_bytearray()
+    try:
+        import json
+        data = json.loads(raw.decode("utf-8"))
+        tables = list(data.get("tables", {}).keys())[:20]
+        await update.effective_message.reply_text(
+            "✅ تم فحص ملف النسخة الاحتياطية.\n"
+            f"Schema: {data.get('schema')}\n"
+            f"Tables: {', '.join(tables)}\n\n"
+            "لأمان البيانات، الاسترجاع التلقائي غير مفعل في هذه النسخة. إذا تريد أفعّله لاحقًا نضيف تأكيد مزدوج قبل الكتابة."
         )
-    await message.answer('\n'.join(lines))
+    except Exception as e:
+        await update.effective_message.reply_text(f"الملف غير صالح: {e}")
+    context.user_data.clear()

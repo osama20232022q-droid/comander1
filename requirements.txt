@@ -1,8 +1,7 @@
-aiogram==3.13.1
-aiosqlite==0.20.0
+python-telegram-bot[job-queue]==21.10
+SQLAlchemy==2.0.36
+psycopg[binary]==3.2.3
 python-dotenv==1.0.1
-APScheduler==3.10.4
-Jinja2==3.1.4
-pydantic==2.8.2
-PyMuPDF==1.24.10
-openai==1.51.2
+jinja2==3.1.4
+pydantic==2.10.4
+pytz==2024.2

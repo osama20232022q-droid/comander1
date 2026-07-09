@@ -1,138 +1,180 @@
 from __future__ import annotations
 
-from aiogram import Router, F
-from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
-
-from app.constants import LEVELS
-from app.keyboards import back_keyboard, subjects_keyboard
-from app.services.planner import create_today_tasks, plan_overview
-from app.services.subject_service import add_lecture, add_subject, list_lectures, list_subjects
-from app.services.user_service import upsert_user
-from app.states import SubjectStates
-
-router = Router()
+from sqlalchemy import select, func
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes
+from app.db import get_session
+from app.models import User, Subject, Attachment
+from app.keyboards import subject_actions_keyboard, nav_keyboard
+from app.utils import normalize_text
 
 
-@router.message(F.text == '📚 المواد')
-async def subjects_home(message: Message) -> None:
-    await upsert_user(message.from_user)
-    await message.answer('📚 لوحة المواد والملازم:', reply_markup=subjects_keyboard())
+def _get_current_user(db, tg_id: int) -> User | None:
+    return db.scalar(select(User).where(User.telegram_id == tg_id))
 
 
-@router.message(F.text == '➕ إضافة مادة')
-async def add_subject_start(message: Message, state: FSMContext) -> None:
-    await state.set_state(SubjectStates.waiting_name)
-    await message.answer('اكتب اسم المادة. مثال: Anatomy / Histology / Biochemistry', reply_markup=back_keyboard())
-
-
-@router.message(SubjectStates.waiting_name)
-async def add_subject_name(message: Message, state: FSMContext) -> None:
-    await state.update_data(name=message.text.strip())
-    await state.set_state(SubjectStates.waiting_exam_date)
-    await message.answer('موعد الامتحان؟ اكتب YYYY-MM-DD أو اكتب: لا')
-
-
-@router.message(SubjectStates.waiting_exam_date)
-async def add_subject_exam(message: Message, state: FSMContext) -> None:
-    exam = None if message.text.strip() in ('لا', '-', 'none') else message.text.strip()
-    await state.update_data(exam_date=exam)
-    await state.set_state(SubjectStates.waiting_level)
-    await message.answer('مستواك بالمادة؟ اختر/اكتب: ضعيف، متوسط، جيد، قوي')
-
-
-@router.message(SubjectStates.waiting_level)
-async def add_subject_level(message: Message, state: FSMContext) -> None:
-    level = message.text.strip()
-    if level not in LEVELS:
-        await message.answer('اكتب واحد من: ضعيف، متوسط، جيد، قوي')
-        return
-    await state.update_data(level=level)
-    await state.set_state(SubjectStates.waiting_practical)
-    await message.answer('بيها عملي؟ اكتب نعم أو لا')
-
-
-@router.message(SubjectStates.waiting_practical)
-async def add_subject_done(message: Message, state: FSMContext) -> None:
-    data = await state.get_data()
-    user = await upsert_user(message.from_user)
-    has_practical = message.text.strip().lower() in ('نعم', 'اي', 'yes', 'y')
-    sid = await add_subject(user['id'], data['name'], data['exam_date'], data['level'], has_practical)
-    await state.clear()
-    await message.answer(f'✅ تمت إضافة المادة رقم {sid}: {data["name"]}', reply_markup=subjects_keyboard())
-
-
-@router.message(F.text == '📖 عرض المواد')
-async def show_subjects(message: Message) -> None:
-    user = await upsert_user(message.from_user)
-    subjects = await list_subjects(user['id'])
-    lectures = await list_lectures(user['id'])
-    if not subjects:
-        await message.answer('لا توجد مواد بعد. اضغط ➕ إضافة مادة.')
-        return
-    lines = ['📚 موادك:']
+async def show_subjects_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    with get_session() as db:
+        user = _get_current_user(db, update.effective_user.id)
+        subjects = db.scalars(select(Subject).where(Subject.user_id == user.id).order_by(Subject.created_at.desc())).all() if user else []
+    rows = [[InlineKeyboardButton("➕ إضافة مادة", callback_data="subject:add")]]
     for s in subjects:
-        lec_count = sum(1 for l in lectures if l['subject_id'] == s['id'])
-        lines.append(f'{s["id"]}. {s["name"]} | مستوى: {s["level"]} | امتحان: {s["exam_date"] or "غير محدد"} | ملازم: {lec_count}')
-    await message.answer('\n'.join(lines))
+        rows.append([InlineKeyboardButton(f"📘 {s.name}", callback_data=f"subject:open:{s.id}")])
+    rows.append([InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data="home")])
+    await update.effective_message.reply_text("📚 قسم المواد\nاختر مادة أو أضف مادة جديدة.", reply_markup=InlineKeyboardMarkup(rows))
 
 
-@router.message(F.text == '➕ إضافة ملزمة')
-async def add_lecture_start(message: Message, state: FSMContext) -> None:
-    user = await upsert_user(message.from_user)
-    subjects = await list_subjects(user['id'])
-    if not subjects:
-        await message.answer('أضف مادة أولًا.')
+async def begin_add_subject(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data["flow"] = "add_subject"
+    await update.effective_message.reply_text("اكتب اسم المادة كما تريد أن يظهر كزر مستقل. مثال: Anatomy", reply_markup=nav_keyboard())
+
+
+async def handle_add_subject(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+    name = normalize_text(text)
+    if len(name) < 2 or len(name) > 80:
+        await update.effective_message.reply_text("اسم المادة غير واضح. اكتب اسمًا بين 2 و80 حرف.")
         return
-    await state.set_state(SubjectStates.waiting_lecture_subject)
-    await message.answer('اكتب رقم المادة التي تريد إضافة ملزمة لها:\n' + '\n'.join(f'{s["id"]}. {s["name"]}' for s in subjects), reply_markup=back_keyboard())
+    with get_session() as db:
+        user = _get_current_user(db, update.effective_user.id)
+        existing = db.scalar(select(Subject).where(Subject.user_id == user.id, func.lower(Subject.name) == name.lower()))
+        if existing:
+            await update.effective_message.reply_text("هذه المادة موجودة مسبقًا.")
+            context.user_data.clear()
+            return
+        subject = Subject(user_id=user.id, name=name)
+        db.add(subject)
+        db.commit()
+        db.refresh(subject)
+    context.user_data.clear()
+    await update.effective_message.reply_text(f"✅ تم إنشاء مادة: {name}")
+    await show_subjects_menu(update, context)
 
 
-@router.message(SubjectStates.waiting_lecture_subject)
-async def add_lecture_subject(message: Message, state: FSMContext) -> None:
-    if not message.text.strip().isdigit():
-        await message.answer('اكتب رقم المادة فقط.')
+async def open_subject(update: Update, context: ContextTypes.DEFAULT_TYPE, subject_id: int) -> None:
+    with get_session() as db:
+        subject = db.get(Subject, subject_id)
+        if not subject:
+            await update.callback_query.message.reply_text("المادة غير موجودة.")
+            return
+        material_count = db.scalar(select(func.count()).select_from(Attachment).where(Attachment.subject_id == subject_id, Attachment.kind == "material")) or 0
+        past_count = db.scalar(select(func.count()).select_from(Attachment).where(Attachment.subject_id == subject_id, Attachment.kind == "past_question")) or 0
+    await update.callback_query.message.reply_text(
+        f"📘 {subject.name}\n\nملحقات المادة: {material_count}\nأسئلة السنوات: {past_count}\n\nاختر الإجراء:",
+        reply_markup=subject_actions_keyboard(subject_id),
+    )
+
+
+async def begin_upload(update: Update, context: ContextTypes.DEFAULT_TYPE, subject_id: int, kind: str) -> None:
+    context.user_data["flow"] = "upload_attachment"
+    context.user_data["upload_subject_id"] = subject_id
+    context.user_data["upload_kind"] = kind
+    kind_ar = "ملحقات المادة" if kind == "material" else "أسئلة السنوات"
+    await update.callback_query.message.reply_text(
+        f"أرسل الآن ملفات {kind_ar}.\n"
+        "أقبل PDF، صور، صوتيات، فيديو، أو نص.\n"
+        "عند الانتهاء اضغط 🏠 القائمة الرئيسية أو اكتب تم.",
+        reply_markup=nav_keyboard(),
+    )
+
+
+async def handle_attachment_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    subject_id = context.user_data.get("upload_subject_id")
+    kind = context.user_data.get("upload_kind")
+    msg = update.effective_message
+    if not subject_id or not kind:
+        await msg.reply_text("اختر المادة أولًا من زر المواد ثم ارفع الملف.")
         return
-    await state.update_data(subject_id=int(message.text.strip()))
-    await state.set_state(SubjectStates.waiting_lecture_title)
-    await message.answer('اكتب عنوان الملزمة.')
+    with get_session() as db:
+        user = _get_current_user(db, update.effective_user.id)
+        subject = db.get(Subject, subject_id)
+        if not user or not subject or subject.user_id != user.id:
+            await msg.reply_text("لا يمكن ربط الملف بهذه المادة.")
+            return
+        att = Attachment(user_id=user.id, subject_id=subject_id, kind=kind, file_type="text")
+        if msg.document:
+            d = msg.document
+            att.file_type = "document"
+            att.telegram_file_id = d.file_id
+            att.telegram_file_unique_id = d.file_unique_id
+            att.file_name = d.file_name
+            att.mime_type = d.mime_type
+            att.file_size = d.file_size
+        elif msg.photo:
+            p = msg.photo[-1]
+            att.file_type = "photo"
+            att.telegram_file_id = p.file_id
+            att.telegram_file_unique_id = p.file_unique_id
+            att.file_size = p.file_size
+            att.file_name = "photo.jpg"
+        elif msg.audio:
+            a = msg.audio
+            att.file_type = "audio"
+            att.telegram_file_id = a.file_id
+            att.telegram_file_unique_id = a.file_unique_id
+            att.file_name = a.file_name or a.title or "audio"
+            att.mime_type = a.mime_type
+            att.file_size = a.file_size
+        elif msg.video:
+            v = msg.video
+            att.file_type = "video"
+            att.telegram_file_id = v.file_id
+            att.telegram_file_unique_id = v.file_unique_id
+            att.file_name = v.file_name or "video.mp4"
+            att.mime_type = v.mime_type
+            att.file_size = v.file_size
+        elif msg.text:
+            if msg.text.strip() == "تم":
+                context.user_data.clear()
+                await msg.reply_text("تم إنهاء رفع الملفات.")
+                return
+            att.file_type = "text"
+            att.text_content = msg.text
+            att.file_name = "text_note.txt"
+        else:
+            await msg.reply_text("هذا النوع غير مدعوم حاليًا.")
+            return
+        db.add(att)
+        db.commit()
+    await msg.reply_text("✅ تم حفظ الملف وربطه بالمادة داخل قاعدة بيانات البوت.")
 
 
-@router.message(SubjectStates.waiting_lecture_title)
-async def add_lecture_title(message: Message, state: FSMContext) -> None:
-    await state.update_data(title=message.text.strip())
-    await state.set_state(SubjectStates.waiting_lecture_pages)
-    await message.answer('عدد الصفحات؟')
-
-
-@router.message(SubjectStates.waiting_lecture_pages)
-async def add_lecture_pages(message: Message, state: FSMContext) -> None:
-    if not message.text.strip().isdigit():
-        await message.answer('اكتب رقم الصفحات فقط.')
+async def list_attachments(update: Update, context: ContextTypes.DEFAULT_TYPE, subject_id: int, kind: str) -> None:
+    query = update.callback_query
+    with get_session() as db:
+        subject = db.get(Subject, subject_id)
+        attachments = db.scalars(select(Attachment).where(Attachment.subject_id == subject_id, Attachment.kind == kind).order_by(Attachment.uploaded_at.desc()).limit(10)).all()
+    if not attachments:
+        await query.message.reply_text("لا توجد ملفات بعد.")
         return
-    data = await state.get_data()
-    pages = int(message.text.strip())
-    est = max(25, pages * 7)
-    lid = await add_lecture(data['subject_id'], data['title'], pages, 'متوسطة', est)
-    await state.clear()
-    await message.answer(f'✅ تمت إضافة الملزمة رقم {lid}. الوقت التقريبي: {est} دقيقة.', reply_markup=subjects_keyboard())
+    await query.message.reply_text(f"آخر الملفات في {subject.name}:")
+    for att in attachments:
+        caption = f"#{att.id} — {att.file_name or att.file_type}"
+        if att.file_type == "document":
+            await query.message.reply_document(att.telegram_file_id, caption=caption)
+        elif att.file_type == "photo":
+            await query.message.reply_photo(att.telegram_file_id, caption=caption)
+        elif att.file_type == "audio":
+            await query.message.reply_audio(att.telegram_file_id, caption=caption)
+        elif att.file_type == "video":
+            await query.message.reply_video(att.telegram_file_id, caption=caption)
+        else:
+            await query.message.reply_text(f"{caption}\n{att.text_content[:1000] if att.text_content else ''}")
 
 
-@router.message(F.text == '🧠 حلل الخطة')
-async def analyze_plan(message: Message) -> None:
-    user = await upsert_user(message.from_user)
-    await message.answer(await plan_overview(user['id']))
-
-
-@router.message(F.text == '📋 يومي')
-async def my_day(message: Message) -> None:
-    user = await upsert_user(message.from_user)
-    tasks = await create_today_tasks(user['id'], available_minutes=300)
-    if not tasks:
-        await message.answer('لا توجد مهام جاهزة. أضف ملازم أولًا.')
-        return
-    lines = ['📋 أوامر اليوم:']
-    for t in tasks:
-        lines.append(f'- {t["start"]}-{t["end"]}: {t["title"]}')
-    lines.append('\nبعد كل جلستين: مشي إجباري 7 دقائق + ماء.')
-    await message.answer('\n'.join(lines))
+async def analyze_subject(update: Update, context: ContextTypes.DEFAULT_TYPE, subject_id: int) -> None:
+    query = update.callback_query
+    with get_session() as db:
+        subject = db.get(Subject, subject_id)
+        material_count = db.scalar(select(func.count()).select_from(Attachment).where(Attachment.subject_id == subject_id, Attachment.kind == "material")) or 0
+        past_count = db.scalar(select(func.count()).select_from(Attachment).where(Attachment.subject_id == subject_id, Attachment.kind == "past_question")) or 0
+    difficulty = "متوسطة"
+    if material_count >= 8 or past_count >= 4:
+        difficulty = "عالية"
+    elif material_count <= 2 and past_count == 0:
+        difficulty = "خفيفة/غير مكتملة"
+    await query.message.reply_text(
+        f"🧠 تحليل سريع للمادة: {subject.name}\n\n"
+        f"ملحقات: {material_count}\nأسئلة سنوات: {past_count}\n"
+        f"الصعوبة التقديرية: {difficulty}\n\n"
+        "ملاحظة: التحليل المعمق الحقيقي يتم من زر خطة دراسية معمقة لأنه يربط المادة بمستواك ونوع الامتحان والأيام المتبقية."
+    )
