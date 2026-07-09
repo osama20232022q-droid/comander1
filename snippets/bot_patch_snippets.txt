@@ -1,0 +1,19 @@
+1) Import:
+from app.handlers.ai_chat import show_ai_chat, handle_ai_chat_text, handle_ai_chat_file
+
+2) handle_text after _require_ready:
+if await handle_ai_chat_text(update, context, text):
+    return
+
+3) handle_files after flow = context.user_data.get("flow"):
+if flow == "ai_chat":
+    if not await _require_ready(update, context):
+        return
+    if await handle_ai_chat_file(update, context):
+        return
+
+4) configure_bot_profile commands:
+BotCommand("ai", "دردشة AI للفهم والشرح"),
+
+5) main handlers:
+app.add_handler(CommandHandler("ai", show_ai_chat))
