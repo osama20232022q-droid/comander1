@@ -15,13 +15,15 @@ from app.models import (
 )
 from app.keyboards import (
     admin_keyboard, nav_keyboard, admin_buttons_keyboard, admin_button_edit_keyboard,
-    button_selector_keyboard, button_confirm_delete_keyboard, button_style_keyboard
+    button_selector_keyboard, button_confirm_delete_keyboard, button_style_keyboard,
+    button_order_scope_keyboard
 )
 from app.services.backup import export_database_to_json
 from app.services.buttons import (
     action_by_label, all_visible_buttons, button_selector_rows, delete_button,
     deleted_buttons, restore_button, rename_button, set_button_style,
-    add_custom_button, restore_default_visibility, display_label, PROTECTED_ACTIONS
+    add_custom_button, restore_default_visibility, display_label, PROTECTED_ACTIONS,
+    buttons_for_exact_scope, set_button_position
 )
 
 
@@ -42,7 +44,7 @@ async def show_buttons_panel(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data.pop("flow", None)
     await update.effective_message.reply_text(
         "🧩 إدارة الأزرار\n\n"
-        "من هنا تستطيع حذف/إخفاء زر، استرجاع زر محذوف، إعادة تسمية، إضافة زر كيبورد أو زر شفاف، وتعديل نمط اللون.",
+        "من هنا تستطيع حذف/إخفاء زر، استرجاع زر محذوف، إعادة تسمية، إضافة زر كيبورد أو زر شفاف، وتعديل نمط اللون، وترتيب مواقع الأزرار يدويًا.",
         reply_markup=admin_buttons_keyboard(),
     )
 
@@ -80,6 +82,7 @@ async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         "🧩 الأزرار": "admin_buttons",
         "✏️ تعديل الأزرار": "admin_button_edit",
         "🎨 تعديل ألوان الأزرار": "admin_button_colors",
+        "↕️ ترتيب الأزرار": "admin_button_order",
         "➕ زر لوحة كيبورد": "admin_add_keyboard",
         "➕ زر شفاف": "admin_add_inline",
         "🗑️ الأزرار المحذوفة": "admin_deleted_buttons",
@@ -143,6 +146,15 @@ async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         buttons = all_visible_buttons()
         await update.effective_message.reply_text("🎨 اختر الزر الذي تريد تعديل نمطه/لونه:", reply_markup=button_selector_keyboard(button_selector_rows(buttons)))
         return True
+    if action == "admin_button_order":
+        context.user_data["flow"] = "button_order_scope"
+        await update.effective_message.reply_text(
+            "↕️ ترتيب الأزرار\n\n"
+            "اختر الشاشة التي تريد ترتيب أزرارها. بعد ذلك اختر الزر، ثم اكتب موقعه الجديد بصيغة: صف,عمود\n"
+            "مثال: 2,1 يعني الصف الثاني / العمود الأول.",
+            reply_markup=button_order_scope_keyboard(),
+        )
+        return True
     if action == "admin_add_keyboard" or action == "admin_add_button_from_edit":
         context.user_data["flow"] = "button_add_label"
         context.user_data["new_button_type"] = "reply"
@@ -178,6 +190,26 @@ async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     return False
 
 
+
+def _match_button_from_list(text: str, buttons: list[ButtonConfig]) -> ButtonConfig | None:
+    clean_text = text.strip()
+    for b in buttons:
+        if clean_text == display_label(b) or clean_text == b.label.strip():
+            return b
+    return None
+
+
+def _parse_position(text: str) -> tuple[int, int] | None:
+    raw = text.strip().replace("؛", ",").replace("،", ",").replace("/", ",").replace("-", ",")
+    raw = raw.replace(" ", "")
+    if "," not in raw:
+        return None
+    left, right = raw.split(",", 1)
+    if not left.isdigit() or not right.isdigit():
+        return None
+    return int(left), int(right)
+
+
 async def handle_admin_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> bool:
     flow = context.user_data.get("flow")
 
@@ -199,6 +231,63 @@ async def handle_admin_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         return True
     if flow == "admin_unban":
         await ban_by_input(update, context, text, False)
+        return True
+
+    if flow == "button_order_scope":
+        scope_map = {
+            "القائمة الرئيسية - main": "main",
+            "لوحة الأدمن - admin": "admin",
+            "إدارة الأزرار - buttons": "admin_buttons",
+            "تعديل الأزرار - edit": "admin_button_edit",
+        }
+        scope = scope_map.get(text)
+        if not scope:
+            await update.effective_message.reply_text("اختر شاشة من الأزرار فقط.", reply_markup=button_order_scope_keyboard())
+            return True
+        context.user_data["order_scope"] = scope
+        context.user_data["flow"] = "button_order_select"
+        buttons = buttons_for_exact_scope(scope)
+        if not buttons:
+            await update.effective_message.reply_text("لا توجد أزرار قابلة للترتيب في هذه الشاشة.", reply_markup=admin_buttons_keyboard())
+            context.user_data.pop("flow", None)
+            return True
+        lines = ["اختر الزر الذي تريد تغيير مكانه:", ""]
+        for b in buttons:
+            lines.append(f"{display_label(b)}  — الصف {b.row_order} / العمود {b.col_order}")
+        await update.effective_message.reply_text("\n".join(lines), reply_markup=button_selector_keyboard(button_selector_rows(buttons)))
+        return True
+
+    if flow == "button_order_select":
+        scope = context.user_data.get("order_scope", "main")
+        buttons = buttons_for_exact_scope(scope)
+        selected = _match_button_from_list(text, buttons)
+        if not selected:
+            await update.effective_message.reply_text("اختر زرًا من القائمة فقط.", reply_markup=button_selector_keyboard(button_selector_rows(buttons)))
+            return True
+        context.user_data["order_action_key"] = selected.action_key
+        context.user_data["order_label"] = display_label(selected)
+        context.user_data["flow"] = "button_order_position"
+        await update.effective_message.reply_text(
+            f"تم اختيار الزر:\n{display_label(selected)}\n\n"
+            f"موقعه الحالي: الصف {selected.row_order} / العمود {selected.col_order}\n"
+            "اكتب الموقع الجديد بصيغة: صف,عمود\n"
+            "مثال: 1,2",
+            reply_markup=nav_keyboard(),
+        )
+        return True
+
+    if flow == "button_order_position":
+        parsed = _parse_position(text)
+        if not parsed:
+            await update.effective_message.reply_text("الصيغة غير صحيحة. اكتبها هكذا: 2,1", reply_markup=nav_keyboard())
+            return True
+        row, col = parsed
+        ok, msg = set_button_position(context.user_data.get("order_action_key", ""), row, col)
+        context.user_data.pop("flow", None)
+        context.user_data.pop("order_scope", None)
+        context.user_data.pop("order_action_key", None)
+        context.user_data.pop("order_label", None)
+        await update.effective_message.reply_text(("✅ " if ok else "⚠️ ") + msg, reply_markup=admin_buttons_keyboard())
         return True
 
     if flow == "button_delete_select":

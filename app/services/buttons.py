@@ -23,6 +23,7 @@ PROTECTED_ACTIONS = {
     "admin_buttons",
     "admin_button_edit",
     "admin_deleted_buttons",
+    "admin_button_order",
     "home",
 }
 
@@ -40,6 +41,7 @@ DEFAULT_BUTTONS: list[dict] = [
     {"action_key": "profile", "label": "👤 ملفي", "scope": "main", "button_type": "reply", "row_order": 5, "col_order": 1, "style": "default"},
     {"action_key": "inline_buttons", "label": "🔘 الأزرار الشفافة", "scope": "main", "button_type": "reply", "row_order": 5, "col_order": 2, "style": "default"},
     {"action_key": "help", "label": "❓ ماذا يفعل هذا البوت؟", "scope": "main", "button_type": "reply", "row_order": 6, "col_order": 1, "style": "default"},
+    {"action_key": "manual_settings", "label": "⚙️ ضبط يدوي", "scope": "main", "button_type": "reply", "row_order": 6, "col_order": 2, "style": "primary"},
     {"action_key": "admin_panel", "label": "👑 لوحة الأدمن", "scope": "admin_entry", "button_type": "reply", "row_order": 99, "col_order": 1, "style": "danger"},
 
     # Admin panel
@@ -61,11 +63,18 @@ DEFAULT_BUTTONS: list[dict] = [
     {"action_key": "admin_add_keyboard", "label": "➕ زر لوحة كيبورد", "scope": "admin_buttons", "button_type": "reply", "row_order": 2, "col_order": 1, "style": "success"},
     {"action_key": "admin_add_inline", "label": "➕ زر شفاف", "scope": "admin_buttons", "button_type": "reply", "row_order": 2, "col_order": 2, "style": "success"},
     {"action_key": "admin_deleted_buttons", "label": "🗑️ الأزرار المحذوفة", "scope": "admin_buttons", "button_type": "reply", "row_order": 3, "col_order": 1, "style": "danger"},
-    {"action_key": "admin_restore_defaults", "label": "🔄 استرجاع الأزرار الافتراضية", "scope": "admin_buttons", "button_type": "reply", "row_order": 3, "col_order": 2, "style": "default"},
+    {"action_key": "admin_button_order", "label": "↕️ ترتيب الأزرار", "scope": "admin_buttons", "button_type": "reply", "row_order": 3, "col_order": 2, "style": "primary"},
+    {"action_key": "admin_restore_defaults", "label": "🔄 استرجاع الأزرار الافتراضية", "scope": "admin_buttons", "button_type": "reply", "row_order": 4, "col_order": 1, "style": "default"},
     {"action_key": "admin_delete_button", "label": "🗑️ حذف زر معين", "scope": "admin_button_edit", "button_type": "reply", "row_order": 1, "col_order": 1, "style": "danger"},
     {"action_key": "admin_rename_button", "label": "✏️ إعادة تسمية زر معين", "scope": "admin_button_edit", "button_type": "reply", "row_order": 1, "col_order": 2, "style": "primary"},
     {"action_key": "admin_add_button_from_edit", "label": "➕ إضافة زر معين", "scope": "admin_button_edit", "button_type": "reply", "row_order": 2, "col_order": 1, "style": "success"},
     {"action_key": "admin_back_buttons", "label": "↩️ رجوع إلى الأزرار", "scope": "admin_button_edit", "button_type": "reply", "row_order": 3, "col_order": 1, "style": "default"},
+
+    # Profile/manual settings buttons
+    {"action_key": "profile_edit", "label": "✏️ تعديل معلوماتي", "scope": "profile", "button_type": "reply", "row_order": 1, "col_order": 1, "style": "primary"},
+    {"action_key": "routine_change", "label": "🔄 تغيير نظامي", "scope": "profile", "button_type": "reply", "row_order": 2, "col_order": 1, "style": "success"},
+    {"action_key": "habit_add", "label": "🌱 إضافة عادة", "scope": "profile", "button_type": "reply", "row_order": 2, "col_order": 2, "style": "success"},
+    {"action_key": "habits_list", "label": "📋 عاداتي", "scope": "profile", "button_type": "reply", "row_order": 3, "col_order": 1, "style": "default"},
 ]
 
 
@@ -305,6 +314,40 @@ def add_custom_button(label: str, response_text: str, button_type: str = "reply"
         db.commit()
         invalidate_buttons_cache()
     return True, "تمت إضافة الزر."
+
+
+def buttons_for_exact_scope(scope: str, reply_only: bool = True) -> list[ButtonConfig]:
+    """Return visible buttons that belong to one exact admin-managed scope.
+
+    This is used by the manual ordering screen so the admin does not mix
+    buttons from different screens while changing positions.
+    """
+    return sorted(
+        [
+            b for b in _all_buttons_cached()
+            if b.visible
+            and b.deleted_at is None
+            and b.scope == scope
+            and (not reply_only or b.button_type == "reply")
+        ],
+        key=lambda b: (b.row_order, b.col_order, b.id),
+    )
+
+
+def set_button_position(action_key: str, row_order: int, col_order: int) -> tuple[bool, str]:
+    if row_order < 1 or row_order > 99:
+        return False, "رقم الصف يجب أن يكون بين 1 و99."
+    if col_order < 1 or col_order > 6:
+        return False, "رقم العمود يجب أن يكون بين 1 و6."
+    with get_session() as db:
+        b = db.scalar(select(ButtonConfig).where(ButtonConfig.action_key == action_key))
+        if not b:
+            return False, "الزر غير موجود."
+        b.row_order = int(row_order)
+        b.col_order = int(col_order)
+        db.commit()
+        invalidate_buttons_cache()
+    return True, f"تم تغيير موقع الزر إلى الصف {row_order} / العمود {col_order}."
 
 
 def inline_custom_keyboard() -> InlineKeyboardMarkup | None:

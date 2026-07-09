@@ -212,3 +212,35 @@ class ButtonConfig(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class HabitPlan(Base):
+    __tablename__ = "habit_plans"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    anchor: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    tiny_action: Mapped[str] = mapped_column(Text, nullable=False)
+    reward: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    duration_days: Mapped[int] = mapped_column(Integer, default=14, nullable=False)
+    current_streak: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="active", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class RoutinePlan(Base):
+    __tablename__ = "routine_plans"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    wake_time: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    sleep_time: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    rule: Mapped[str | None] = mapped_column(Text, nullable=True)
+    duration_days: Mapped[int] = mapped_column(Integer, default=14, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="trial", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)

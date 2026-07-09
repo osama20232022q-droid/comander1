@@ -28,6 +28,7 @@ def main_keyboard(is_admin: bool = False) -> ReplyKeyboardMarkup:
             ["📊 تقدمي", "🏅 شهاداتي"],
             ["👤 ملفي"],
             ["🔘 الأزرار الشفافة", "❓ ماذا يفعل هذا البوت؟"],
+            ["⚙️ ضبط يدوي"],
         ]
         if is_admin:
             rows.append(["👑 لوحة الأدمن"])
@@ -115,7 +116,8 @@ def admin_buttons_keyboard() -> ReplyKeyboardMarkup:
         rows = [
             ["✏️ تعديل الأزرار", "🎨 تعديل ألوان الأزرار"],
             ["➕ زر لوحة كيبورد", "➕ زر شفاف"],
-            ["🗑️ الأزرار المحذوفة", "🔄 استرجاع الأزرار الافتراضية"],
+            ["🗑️ الأزرار المحذوفة", "↕️ ترتيب الأزرار"],
+            ["🔄 استرجاع الأزرار الافتراضية"],
             ["👑 لوحة الأدمن", "🏠 القائمة الرئيسية"],
         ]
     return rk(rows, "إدارة الأزرار")
@@ -148,3 +150,64 @@ def button_style_keyboard() -> ReplyKeyboardMarkup:
         ["🟢 أخضر", "🔴 أحمر"],
         ["↩️ رجوع إلى الأزرار", "👑 لوحة الأدمن"],
     ], "اختر نمط الزر")
+
+
+def button_order_scope_keyboard() -> ReplyKeyboardMarkup:
+    return rk([
+        ["القائمة الرئيسية - main", "لوحة الأدمن - admin"],
+        ["إدارة الأزرار - buttons", "تعديل الأزرار - edit"],
+        ["↩️ رجوع إلى الأزرار", "👑 لوحة الأدمن"],
+    ], "اختر الشاشة التي تريد ترتيب أزرارها")
+
+
+def profile_keyboard() -> ReplyKeyboardMarkup:
+    rows = _dynamic_rows("profile")
+    if not rows:
+        rows = [
+            ["✏️ تعديل معلوماتي"],
+            ["🔄 تغيير نظامي", "🌱 إضافة عادة"],
+            ["📋 عاداتي"],
+            ["🏠 القائمة الرئيسية"],
+        ]
+    return rk(rows, "ملفك الشخصي")
+
+def manual_settings_keyboard() -> ReplyKeyboardMarkup:
+    rows = _dynamic_rows("profile")
+    if not rows:
+        rows = [
+            ["✏️ تعديل معلوماتي"],
+            ["🔄 تغيير نظامي", "🌱 إضافة عادة"],
+            ["📋 عاداتي"],
+            ["🏠 القائمة الرئيسية"],
+        ]
+    return rk(rows, "الضبط اليدوي")
+
+
+def habit_duration_keyboard() -> ReplyKeyboardMarkup:
+    return rk([
+        ["7 أيام", "14 يوم"],
+        ["21 يوم", "30 يوم"],
+        ["⚙️ الضبط اليدوي", "🏠 القائمة الرئيسية"],
+    ], "اختر مدة العادة")
+
+
+def habit_review_keyboard() -> ReplyKeyboardMarkup:
+    return rk([
+        ["✅ حفظ العادة", "🔴 رجوع للتعديل"],
+        ["⚙️ الضبط اليدوي", "🏠 القائمة الرئيسية"],
+    ], "تأكيد العادة")
+
+
+def routine_type_keyboard() -> ReplyKeyboardMarkup:
+    return rk([
+        ["نظام صباحي", "نظام نوم مبكر"],
+        ["نظام دراسة ثابت", "نظام مخصص"],
+        ["⚙️ الضبط اليدوي", "🏠 القائمة الرئيسية"],
+    ], "اختر نوع النظام")
+
+
+def routine_review_keyboard() -> ReplyKeyboardMarkup:
+    return rk([
+        ["✅ حفظ النظام", "🔴 رجوع للتعديل"],
+        ["⚙️ الضبط اليدوي", "🏠 القائمة الرئيسية"],
+    ], "تأكيد النظام")

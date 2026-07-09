@@ -19,9 +19,10 @@ from app.handlers.plans import start_plan_flow, handle_plan_text, handle_plan_ca
 from app.handlers.pomodoro import show_pomodoro, handle_pomodoro_text, handle_custom_pomo, handle_food_log, show_remaining
 from app.handlers.motivation import motivate
 from app.handlers.prayer_reminders import handle_prayer_text, show_prayer_menu, prayer_notifier_job
-from app.handlers.progress import show_progress, show_profile
+from app.handlers.progress import show_progress, show_profile, start_profile_edit, handle_profile_edit_text
 from app.handlers.certificates import show_certificates, handle_certificate_text, handle_cert_callback
 from app.handlers.admin import show_admin_panel, handle_admin_callback, is_admin_tg, handle_restore_file, handle_admin_text
+from app.handlers.habits import show_manual_settings, start_routine_change, start_habit_add, handle_habit_text, list_habits
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
 log = logging.getLogger("study_commander")
@@ -137,6 +138,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if await handle_admin_text(update, context, text):
             return
 
+    if flow == "profile_edit":
+        if await handle_profile_edit_text(update, context, text):
+            return
+    if flow in ["habit_add", "routine_change"]:
+        if await handle_habit_text(update, context, text):
+            return
+
     if flow == "add_subject":
         await handle_add_subject(update, context, text)
         return
@@ -160,7 +168,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     # Main menu
-    main_btn = action_by_label(text, scopes=("main", "both", "admin_entry"))
+    main_btn = action_by_label(text, scopes=("main", "profile", "both", "admin_entry"))
     main_action = main_btn.action_key if main_btn else None
 
     if main_action == "subjects" or text == "📚 المواد":
@@ -203,6 +211,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
     elif main_action == "profile" or text == "👤 ملفي":
         await show_profile(update, context)
+    elif main_action == "manual_settings" or text == "⚙️ ضبط يدوي":
+        await show_manual_settings(update, context)
+    elif main_action == "profile_edit" or text == "✏️ تعديل معلوماتي":
+        await start_profile_edit(update, context)
+    elif main_action == "routine_change" or text == "🔄 تغيير نظامي":
+        await start_routine_change(update, context)
+    elif main_action == "habit_add" or text == "🌱 إضافة عادة":
+        await start_habit_add(update, context)
+    elif main_action == "habits_list" or text == "📋 عاداتي":
+        await list_habits(update, context)
     elif main_action == "remaining" or text == "⌛ كم المتبقي؟":
         await show_remaining(update, context)
     elif main_action == "help" or text == "❓ ماذا يفعل هذا البوت؟":
@@ -282,6 +300,7 @@ async def configure_bot_profile(app: Application) -> None:
         BotCommand("remaining", "عرض الوقت المتبقي للبومودورو"),
         BotCommand("prayer", "أذكار الصلاة وتذكيرات الأوقات"),
         BotCommand("profile", "عرض ملفي"),
+        BotCommand("habits", "عاداتي وتغيير النظام"),
         BotCommand("admin", "لوحة الأدمن"),
     ]
     await app.bot.set_my_commands(commands)
@@ -315,6 +334,7 @@ async def main() -> None:
     app.add_handler(CommandHandler("remaining", show_remaining))
     app.add_handler(CommandHandler("prayer", show_prayer_menu))
     app.add_handler(CommandHandler("profile", show_profile))
+    app.add_handler(CommandHandler("habits", show_manual_settings))
     app.add_handler(CommandHandler("admin", show_admin_panel))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
