@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Iterable
+from types import SimpleNamespace
+import os
+import time
 from sqlalchemy import select, func
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -65,13 +68,59 @@ DEFAULT_BUTTONS: list[dict] = [
 ]
 
 
+_DEFAULTS_READY = False
+_BUTTON_CACHE_TTL = float(os.getenv("BUTTON_CACHE_TTL", "30"))
+_BUTTON_CACHE_EXPIRES = 0.0
+_BUTTON_CACHE: list[SimpleNamespace] | None = None
+
+
+def invalidate_buttons_cache() -> None:
+    global _BUTTON_CACHE, _BUTTON_CACHE_EXPIRES
+    _BUTTON_CACHE = None
+    _BUTTON_CACHE_EXPIRES = 0.0
+
+
+def _snapshot_button(b: ButtonConfig) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=b.id,
+        action_key=b.action_key,
+        label=b.label,
+        scope=b.scope,
+        button_type=b.button_type,
+        row_order=b.row_order,
+        col_order=b.col_order,
+        style=b.style,
+        visible=b.visible,
+        response_text=b.response_text,
+        deleted_at=b.deleted_at,
+        created_at=b.created_at,
+        updated_at=b.updated_at,
+    )
+
+
+def _all_buttons_cached() -> list[SimpleNamespace]:
+    global _BUTTON_CACHE, _BUTTON_CACHE_EXPIRES
+    ensure_default_buttons()
+    now = time.monotonic()
+    if _BUTTON_CACHE is not None and now < _BUTTON_CACHE_EXPIRES:
+        return list(_BUTTON_CACHE)
+    with get_session() as db:
+        buttons = db.scalars(select(ButtonConfig).order_by(ButtonConfig.scope, ButtonConfig.row_order, ButtonConfig.col_order, ButtonConfig.id)).all()
+        _BUTTON_CACHE = [_snapshot_button(b) for b in buttons]
+        _BUTTON_CACHE_EXPIRES = now + _BUTTON_CACHE_TTL
+        return list(_BUTTON_CACHE)
+
+
 def ensure_default_buttons(db=None) -> None:
+    global _DEFAULTS_READY
+    if _DEFAULTS_READY and db is None:
+        return
     close = False
     if db is None:
         db = get_session()
         close = True
     try:
-        existing = {b.action_key: b for b in db.scalars(select(ButtonConfig)).all()}
+        existing = set(db.scalars(select(ButtonConfig.action_key)).all())
         changed = False
         for item in DEFAULT_BUTTONS:
             if item["action_key"] not in existing:
@@ -79,6 +128,8 @@ def ensure_default_buttons(db=None) -> None:
                 changed = True
         if changed:
             db.commit()
+            invalidate_buttons_cache()
+        _DEFAULTS_READY = True
     finally:
         if close:
             db.close()
@@ -103,27 +154,21 @@ def display_label(btn: ButtonConfig) -> str:
 
 
 def action_by_label(text: str, scopes: Iterable[str] = ("main", "both")) -> ButtonConfig | None:
-    ensure_default_buttons()
     raw = text.strip()
     clean = _strip_color_prefix(raw)
-    with get_session() as db:
-        buttons = db.scalars(
-            select(ButtonConfig).where(
-                ButtonConfig.visible == True,
-                ButtonConfig.deleted_at.is_(None),
-                ButtonConfig.scope.in_(list(scopes)),
-            )
-        ).all()
-        for b in buttons:
+    scope_set = set(scopes)
+    for b in _all_buttons_cached():
+        if b.visible and b.deleted_at is None and b.scope in scope_set:
             if raw == display_label(b) or clean == _strip_color_prefix(b.label):
                 return b
     return None
 
 
 def get_button(action_key: str) -> ButtonConfig | None:
-    ensure_default_buttons()
-    with get_session() as db:
-        return db.scalar(select(ButtonConfig).where(ButtonConfig.action_key == action_key))
+    for b in _all_buttons_cached():
+        if b.action_key == action_key:
+            return b
+    return None
 
 
 def label_for(action_key: str, fallback: str | None = None) -> str:
@@ -134,19 +179,13 @@ def label_for(action_key: str, fallback: str | None = None) -> str:
 
 
 def buttons_for_scope(scope: str, include_admin_entry: bool = False) -> list[ButtonConfig]:
-    ensure_default_buttons()
-    scopes = [scope, "both"]
+    scopes = {scope, "both"}
     if include_admin_entry:
-        scopes.append("admin_entry")
-    with get_session() as db:
-        return db.scalars(
-            select(ButtonConfig).where(
-                ButtonConfig.visible == True,
-                ButtonConfig.deleted_at.is_(None),
-                ButtonConfig.button_type == "reply",
-                ButtonConfig.scope.in_(scopes),
-            ).order_by(ButtonConfig.row_order.asc(), ButtonConfig.col_order.asc(), ButtonConfig.id.asc())
-        ).all()
+        scopes.add("admin_entry")
+    return sorted(
+        [b for b in _all_buttons_cached() if b.visible and b.deleted_at is None and b.button_type == "reply" and b.scope in scopes],
+        key=lambda b: (b.row_order, b.col_order, b.id),
+    )
 
 
 def keyboard_rows_for_scope(scope: str, include_admin_entry: bool = False) -> list[list[str]]:
@@ -157,19 +196,18 @@ def keyboard_rows_for_scope(scope: str, include_admin_entry: bool = False) -> li
 
 
 def all_visible_buttons() -> list[ButtonConfig]:
-    ensure_default_buttons()
-    with get_session() as db:
-        return db.scalars(
-            select(ButtonConfig).where(ButtonConfig.visible == True, ButtonConfig.deleted_at.is_(None)).order_by(ButtonConfig.scope, ButtonConfig.row_order, ButtonConfig.col_order)
-        ).all()
+    return sorted(
+        [b for b in _all_buttons_cached() if b.visible and b.deleted_at is None],
+        key=lambda b: (b.scope, b.row_order, b.col_order, b.id),
+    )
 
 
 def deleted_buttons() -> list[ButtonConfig]:
-    ensure_default_buttons()
-    with get_session() as db:
-        return db.scalars(
-            select(ButtonConfig).where(ButtonConfig.deleted_at.is_not(None)).order_by(ButtonConfig.deleted_at.desc())
-        ).all()
+    return sorted(
+        [b for b in _all_buttons_cached() if b.deleted_at is not None],
+        key=lambda b: b.deleted_at or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
 
 
 def button_selector_rows(buttons: list[ButtonConfig], add_nav: bool = True) -> list[list[str]]:
@@ -197,6 +235,7 @@ def delete_button(action_key: str) -> tuple[bool, str]:
         b.visible = False
         b.deleted_at = datetime.now(timezone.utc)
         db.commit()
+        invalidate_buttons_cache()
     return True, "تم حذف/إخفاء الزر. تستطيع استرجاعه من الأزرار المحذوفة."
 
 
@@ -208,6 +247,7 @@ def restore_button(action_key: str) -> tuple[bool, str]:
         b.visible = True
         b.deleted_at = None
         db.commit()
+        invalidate_buttons_cache()
     return True, "تم استرجاع الزر."
 
 
@@ -221,6 +261,7 @@ def rename_button(action_key: str, new_label: str) -> tuple[bool, str]:
             return False, "الزر غير موجود."
         b.label = _strip_color_prefix(new_label)
         db.commit()
+        invalidate_buttons_cache()
     return True, "تمت إعادة تسمية الزر."
 
 
@@ -233,6 +274,7 @@ def set_button_style(action_key: str, style: str) -> tuple[bool, str]:
             return False, "الزر غير موجود."
         b.style = style
         db.commit()
+        invalidate_buttons_cache()
     return True, "تم تعديل نمط الزر. ملاحظة: Telegram قد يعرض اللون حسب إصدار التطبيق؛ وإلا سيظهر رمز اللون."
 
 
@@ -260,13 +302,15 @@ def add_custom_button(label: str, response_text: str, button_type: str = "reply"
             visible=True,
         ))
         db.commit()
+        invalidate_buttons_cache()
     return True, "تمت إضافة الزر."
 
 
 def inline_custom_keyboard() -> InlineKeyboardMarkup | None:
-    ensure_default_buttons()
-    with get_session() as db:
-        buttons = db.scalars(select(ButtonConfig).where(ButtonConfig.visible == True, ButtonConfig.deleted_at.is_(None), ButtonConfig.button_type == "inline", ButtonConfig.action_key.like("custom:%")).order_by(ButtonConfig.id.asc())).all()
+    buttons = sorted(
+        [b for b in _all_buttons_cached() if b.visible and b.deleted_at is None and b.button_type == "inline" and str(b.action_key).startswith("custom:")],
+        key=lambda b: b.id,
+    )
     if not buttons:
         return None
     rows = [[InlineKeyboardButton(display_label(b), callback_data=f"custombtn:{b.id}")] for b in buttons]
@@ -297,3 +341,4 @@ def restore_default_visibility() -> None:
                 b.visible = True
                 b.deleted_at = None
         db.commit()
+        invalidate_buttons_cache()
