@@ -11,12 +11,24 @@ from app.utils import classify_college
 def ensure_user(db: Session, tg_user) -> User:
     user = db.scalar(select(User).where(User.telegram_id == tg_user.id))
     if user:
-        user.username = tg_user.username
-        user.first_name = tg_user.first_name
-        if tg_user.id in settings.admin_ids:
+        changed = False
+        if user.username != tg_user.username:
+            user.username = tg_user.username
+            changed = True
+        if user.first_name != tg_user.first_name:
+            user.first_name = tg_user.first_name
+            changed = True
+        if tg_user.id in settings.admin_ids and (user.role != "admin" or not user.is_active):
             user.role = "admin"
             user.is_active = True
-        db.commit()
+            changed = True
+        if changed:
+            db.commit()
+            try:
+                from app.services.access_cache import invalidate_user_access
+                invalidate_user_access(tg_user.id)
+            except Exception:
+                pass
         return user
     role = "admin" if tg_user.id in settings.admin_ids else "student"
     user = User(
@@ -29,6 +41,11 @@ def ensure_user(db: Session, tg_user) -> User:
     db.add(user)
     db.commit()
     db.refresh(user)
+    try:
+        from app.services.access_cache import invalidate_user_access
+        invalidate_user_access(tg_user.id)
+    except Exception:
+        pass
     return user
 
 
@@ -49,6 +66,11 @@ def save_profile(db: Session, user: User, draft: dict) -> StudentProfile:
     profile.confirmed = True
     db.commit()
     db.refresh(profile)
+    try:
+        from app.services.access_cache import invalidate_user_access
+        invalidate_user_access(user.telegram_id)
+    except Exception:
+        pass
     return profile
 
 
@@ -63,6 +85,11 @@ def activate_user(db: Session, admin: User, target_id: int, days: int | None = N
         target.access_until = None
     db.add(AdminAction(admin_user_id=admin.id, target_user_id=target.id, action="activate", details=f"days={days}"))
     db.commit()
+    try:
+        from app.services.access_cache import invalidate_user_access
+        invalidate_user_access(target.telegram_id)
+    except Exception:
+        pass
     return target
 
 
@@ -73,4 +100,9 @@ def ban_user(db: Session, admin: User, target_id: int, banned: bool = True) -> U
     target.is_banned = banned
     db.add(AdminAction(admin_user_id=admin.id, target_user_id=target.id, action="ban" if banned else "unban"))
     db.commit()
+    try:
+        from app.services.access_cache import invalidate_user_access
+        invalidate_user_access(target.telegram_id)
+    except Exception:
+        pass
     return target

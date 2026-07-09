@@ -79,15 +79,21 @@ DEFAULT_BUTTONS: list[dict] = [
 
 
 _DEFAULTS_READY = False
-_BUTTON_CACHE_TTL = float(os.getenv("BUTTON_CACHE_TTL", "30"))
+_BUTTON_CACHE_TTL = float(os.getenv("BUTTON_CACHE_TTL", "300"))
 _BUTTON_CACHE_EXPIRES = 0.0
 _BUTTON_CACHE: list[SimpleNamespace] | None = None
+_BUTTON_CACHE_VERSION = 0
+
+
+def buttons_cache_version() -> int:
+    return _BUTTON_CACHE_VERSION
 
 
 def invalidate_buttons_cache() -> None:
-    global _BUTTON_CACHE, _BUTTON_CACHE_EXPIRES
+    global _BUTTON_CACHE, _BUTTON_CACHE_EXPIRES, _BUTTON_CACHE_VERSION
     _BUTTON_CACHE = None
     _BUTTON_CACHE_EXPIRES = 0.0
+    _BUTTON_CACHE_VERSION += 1
 
 
 def _snapshot_button(b: ButtonConfig) -> SimpleNamespace:

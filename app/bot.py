@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timezone
 from telegram import Update, BotCommand
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
@@ -8,6 +9,7 @@ from app.config import settings
 from app.db import init_db, get_session
 from app.models import User
 from app.repositories.users_repo import ensure_user
+from app.services.access_cache import get_access_snapshot, access_is_valid
 from app.keyboards import main_keyboard
 from app.services.buttons import action_by_label, inline_custom_keyboard, custom_button_response_by_id, ensure_default_buttons
 from app.handlers.onboarding import start_onboarding, handle_onboarding_text, confirm_onboarding
@@ -28,25 +30,16 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(
 log = logging.getLogger("study_commander")
 
 
-def _is_access_valid(user: User) -> bool:
-    if user.role == "admin":
-        return True
-    if not user.is_active or user.is_banned:
-        return False
-    if user.access_until and user.access_until < datetime.now(timezone.utc):
-        return False
-    return True
+def _snapshot_ready(snapshot) -> bool:
+    return bool(snapshot.profile_confirmed and access_is_valid(snapshot))
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    with get_session() as db:
-        user = ensure_user(db, update.effective_user)
-        profile_confirmed = bool(user.profile and user.profile.confirmed)
-        access_ok = _is_access_valid(user)
-    if not profile_confirmed:
+    snapshot = get_access_snapshot(update.effective_user)
+    if not snapshot.profile_confirmed:
         await start_onboarding(update, context)
         return
-    if not access_ok:
+    if not access_is_valid(snapshot):
         await update.effective_message.reply_text(
             "تم حفظ ملفك، لكن حسابك غير مفعل بعد أو انتهت صلاحيته.\n"
             f"معرفك الرقمي للأدمن: {update.effective_user.id}\n"
@@ -80,20 +73,19 @@ async def go_home(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def _require_ready(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    with get_session() as db:
-        user = ensure_user(db, update.effective_user)
-        if user.is_banned:
-            await update.effective_message.reply_text("حسابك محظور.")
-            return False
-        if not (user.profile and user.profile.confirmed):
-            await start_onboarding(update, context)
-            return False
-        if not _is_access_valid(user):
-            await update.effective_message.reply_text(
-                "حسابك بانتظار تفعيل الأدمن أو انتهت صلاحيته.\n"
-                f"معرفك الرقمي: {update.effective_user.id}"
-            )
-            return False
+    snapshot = get_access_snapshot(update.effective_user)
+    if snapshot.is_banned:
+        await update.effective_message.reply_text("حسابك محظور.")
+        return False
+    if not snapshot.profile_confirmed:
+        await start_onboarding(update, context)
+        return False
+    if not access_is_valid(snapshot):
+        await update.effective_message.reply_text(
+            "حسابك بانتظار تفعيل الأدمن أو انتهت صلاحيته.\n"
+            f"معرفك الرقمي: {update.effective_user.id}"
+        )
+        return False
     return True
 
 
@@ -121,6 +113,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     if flow == "onboarding":
         await handle_onboarding_text(update, context, text)
+        return
+
+    # Ultra-fast local actions: no database access needed.
+    if text == "⌛ كم المتبقي?" or text == "⌛ كم المتبقي؟":
+        await show_remaining(update, context)
         return
 
     if not await _require_ready(update, context):
@@ -321,11 +318,11 @@ async def main() -> None:
     app = (
         Application.builder()
         .token(settings.bot_token)
-        .concurrent_updates(True)
-        .connection_pool_size(32)
-        .pool_timeout(30)
-        .read_timeout(30)
-        .write_timeout(30)
+        .concurrent_updates(int(os.getenv("BOT_CONCURRENT_UPDATES", "64")))
+        .connection_pool_size(int(os.getenv("TG_CONNECTION_POOL_SIZE", "64")))
+        .pool_timeout(float(os.getenv("TG_POOL_TIMEOUT", "10")))
+        .read_timeout(float(os.getenv("TG_READ_TIMEOUT", "20")))
+        .write_timeout(float(os.getenv("TG_WRITE_TIMEOUT", "20")))
         .build()
     )
     app.add_handler(CommandHandler("start", cmd_start))
@@ -340,8 +337,13 @@ async def main() -> None:
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler((filters.Document.ALL | filters.PHOTO | filters.AUDIO | filters.VIDEO) & ~filters.COMMAND, handle_files))
     app.add_error_handler(error_handler)
-    if app.job_queue:
-        app.job_queue.run_repeating(prayer_notifier_job, interval=60, first=20, name="prayer_notifier")
+    if app.job_queue and os.getenv("PRAYER_NOTIFIER_ENABLED", "true").lower() == "true":
+        app.job_queue.run_repeating(
+            prayer_notifier_job,
+            interval=int(os.getenv("PRAYER_JOB_INTERVAL", "60")),
+            first=int(os.getenv("PRAYER_JOB_FIRST", "20")),
+            name="prayer_notifier",
+        )
     log.info("Study Commander Bot v6 prayer reminders patch started")
     await app.initialize()
     await configure_bot_profile(app)
