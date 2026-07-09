@@ -9,7 +9,7 @@ from app.models import User, PomodoroSession, FoodLog, PrayerSetting
 from app.keyboards import pomodoro_menu_keyboard, pomodoro_running_keyboard, nav_keyboard
 from app.services.break_engine import build_break_recommendation
 from app.services.calories import estimate_calories
-from app.services.prayer import seconds_until_next_prayer, PRAYER_LABELS
+from app.services.prayer import seconds_until_next_prayer_for_user, PRAYER_LABELS
 
 
 def _current_user(db, tg_id: int) -> User | None:
@@ -100,7 +100,7 @@ async def start_pomodoro(message, context: ContextTypes.DEFAULT_TYPE, tg_id: int
         prayer_note = ""
         effective_seconds = study_minutes * 60
         if prayer_setting and prayer_setting.governorate:
-            nxt = seconds_until_next_prayer(prayer_setting.governorate)
+            nxt = seconds_until_next_prayer_for_user(user.id, prayer_setting.governorate)
             if nxt:
                 prayer_key, seconds_left = nxt
                 if 60 < seconds_left < effective_seconds:
