@@ -7,21 +7,6 @@ def rk(rows: list[list[str]], placeholder: str = "اختر أمرًا") -> Reply
     return ReplyKeyboardMarkup(rows, resize_keyboard=True, one_time_keyboard=False, input_field_placeholder=placeholder)
 
 
-def _buttons_version() -> int:
-    try:
-        from app.services.buttons import buttons_cache_version
-        return buttons_cache_version()
-    except Exception:
-        return 0
-
-
-_KB_CACHE: dict[tuple[str, bool, int], ReplyKeyboardMarkup] = {}
-
-
-def clear_keyboard_cache() -> None:
-    _KB_CACHE.clear()
-
-
 def _dynamic_rows(scope: str, include_admin_entry: bool = False) -> list[list[str]]:
     try:
         from app.services.buttons import keyboard_rows_for_scope
@@ -33,37 +18,21 @@ def _dynamic_rows(scope: str, include_admin_entry: bool = False) -> list[list[st
     return []
 
 
-def _cached_dynamic_keyboard(scope: str, placeholder: str, include_admin_entry: bool = False, fallback_rows: list[list[str]] | None = None) -> ReplyKeyboardMarkup:
-    version = _buttons_version()
-    key = (scope, include_admin_entry, version)
-    cached = _KB_CACHE.get(key)
-    if cached is not None:
-        return cached
-    rows = _dynamic_rows(scope, include_admin_entry=include_admin_entry)
-    if not rows:
-        rows = fallback_rows or []
-    markup = rk(rows, placeholder)
-    _KB_CACHE[key] = markup
-    # Keep cache bounded in long-running deployments.
-    if len(_KB_CACHE) > 64:
-        for old_key in list(_KB_CACHE.keys())[:16]:
-            _KB_CACHE.pop(old_key, None)
-    return markup
-
-
 def main_keyboard(is_admin: bool = False) -> ReplyKeyboardMarkup:
-    fallback = [
-        ["📚 المواد", "🧠 خطة دراسية معمقة"],
-        ["⏳ البومودورو", "⌛ كم المتبقي؟"],
-        ["🔥 حفزني", "🕌 أذكار الصلاة"],
-        ["📊 تقدمي", "🏅 شهاداتي"],
-        ["👤 ملفي"],
-        ["🔘 الأزرار الشفافة", "❓ ماذا يفعل هذا البوت؟"],
-        ["⚙️ ضبط يدوي"],
-    ]
-    if is_admin:
-        fallback.append(["👑 لوحة الأدمن"])
-    return _cached_dynamic_keyboard("main", "اختر أمرًا", include_admin_entry=is_admin, fallback_rows=fallback)
+    rows = _dynamic_rows("main", include_admin_entry=is_admin)
+    if not rows:
+        rows = [
+            ["📚 المواد", "🧠 خطة دراسية معمقة"],
+            ["⏳ البومودورو", "⌛ كم المتبقي؟"],
+            ["🔥 حفزني", "🕌 أذكار الصلاة"],
+            ["📊 تقدمي", "🏅 شهاداتي"],
+            ["👤 ملفي"],
+            ["🔘 الأزرار الشفافة", "❓ ماذا يفعل هذا البوت؟"],
+            ["⚙️ ضبط يدوي"],
+        ]
+        if is_admin:
+            rows.append(["👑 لوحة الأدمن"])
+    return rk(rows)
 
 
 def nav_keyboard() -> ReplyKeyboardMarkup:
@@ -128,35 +97,41 @@ def certificate_keyboard() -> ReplyKeyboardMarkup:
 
 
 def admin_keyboard() -> ReplyKeyboardMarkup:
-    fallback = [
-        ["👥 طلبات التفعيل", "➕ تفعيل مشترك"],
-        ["📊 إحصائيات النظام", "📋 المستخدمون"],
-        ["🚫 حظر مستخدم", "✅ إلغاء الحظر"],
-        ["🧩 الأزرار", "📦 نسخة احتياطية الآن"],
-        ["♻️ فحص ملف استرجاع", "☁️ حالة قاعدة البيانات"],
-        ["🏠 القائمة الرئيسية"],
-    ]
-    return _cached_dynamic_keyboard("admin", "لوحة الأدمن", fallback_rows=fallback)
+    rows = _dynamic_rows("admin")
+    if not rows:
+        rows = [
+            ["👥 طلبات التفعيل", "➕ تفعيل مشترك"],
+            ["📊 إحصائيات النظام", "📋 المستخدمون"],
+            ["🚫 حظر مستخدم", "✅ إلغاء الحظر"],
+            ["🧩 الأزرار", "📦 نسخة احتياطية الآن"],
+            ["♻️ فحص ملف استرجاع", "☁️ حالة قاعدة البيانات"],
+            ["🏠 القائمة الرئيسية"],
+        ]
+    return rk(rows, "لوحة الأدمن")
 
 
 def admin_buttons_keyboard() -> ReplyKeyboardMarkup:
-    fallback = [
-        ["✏️ تعديل الأزرار", "🎨 تعديل ألوان الأزرار"],
-        ["➕ زر لوحة كيبورد", "➕ زر شفاف"],
-        ["🗑️ الأزرار المحذوفة", "↕️ ترتيب الأزرار"],
-        ["🔄 استرجاع الأزرار الافتراضية"],
-        ["👑 لوحة الأدمن", "🏠 القائمة الرئيسية"],
-    ]
-    return _cached_dynamic_keyboard("admin_buttons", "إدارة الأزرار", fallback_rows=fallback)
+    rows = _dynamic_rows("admin_buttons")
+    if not rows:
+        rows = [
+            ["✏️ تعديل الأزرار", "🎨 تعديل ألوان الأزرار"],
+            ["➕ زر لوحة كيبورد", "➕ زر شفاف"],
+            ["🗑️ الأزرار المحذوفة", "↕️ ترتيب الأزرار"],
+            ["🔄 استرجاع الأزرار الافتراضية"],
+            ["👑 لوحة الأدمن", "🏠 القائمة الرئيسية"],
+        ]
+    return rk(rows, "إدارة الأزرار")
 
 
 def admin_button_edit_keyboard() -> ReplyKeyboardMarkup:
-    fallback = [
-        ["🗑️ حذف زر معين", "✏️ إعادة تسمية زر معين"],
-        ["➕ إضافة زر معين"],
-        ["↩️ رجوع إلى الأزرار", "👑 لوحة الأدمن"],
-    ]
-    return _cached_dynamic_keyboard("admin_button_edit", "تعديل الأزرار", fallback_rows=fallback)
+    rows = _dynamic_rows("admin_button_edit")
+    if not rows:
+        rows = [
+            ["🗑️ حذف زر معين", "✏️ إعادة تسمية زر معين"],
+            ["➕ إضافة زر معين"],
+            ["↩️ رجوع إلى الأزرار", "👑 لوحة الأدمن"],
+        ]
+    return rk(rows, "تعديل الأزرار")
 
 
 def button_selector_keyboard(rows: list[list[str]], placeholder: str = "اختر زرًا") -> ReplyKeyboardMarkup:
@@ -186,23 +161,26 @@ def button_order_scope_keyboard() -> ReplyKeyboardMarkup:
 
 
 def profile_keyboard() -> ReplyKeyboardMarkup:
-    fallback = [
-        ["✏️ تعديل معلوماتي"],
-        ["🔄 تغيير نظامي", "🌱 إضافة عادة"],
-        ["📋 عاداتي"],
-        ["🏠 القائمة الرئيسية"],
-    ]
-    return _cached_dynamic_keyboard("profile", "ملفك الشخصي", fallback_rows=fallback)
-
+    rows = _dynamic_rows("profile")
+    if not rows:
+        rows = [
+            ["✏️ تعديل معلوماتي"],
+            ["🔄 تغيير نظامي", "🌱 إضافة عادة"],
+            ["📋 عاداتي"],
+            ["🏠 القائمة الرئيسية"],
+        ]
+    return rk(rows, "ملفك الشخصي")
 
 def manual_settings_keyboard() -> ReplyKeyboardMarkup:
-    fallback = [
-        ["✏️ تعديل معلوماتي"],
-        ["🔄 تغيير نظامي", "🌱 إضافة عادة"],
-        ["📋 عاداتي"],
-        ["🏠 القائمة الرئيسية"],
-    ]
-    return _cached_dynamic_keyboard("profile", "الضبط اليدوي", fallback_rows=fallback)
+    rows = _dynamic_rows("profile")
+    if not rows:
+        rows = [
+            ["✏️ تعديل معلوماتي"],
+            ["🔄 تغيير نظامي", "🌱 إضافة عادة"],
+            ["📋 عاداتي"],
+            ["🏠 القائمة الرئيسية"],
+        ]
+    return rk(rows, "الضبط اليدوي")
 
 
 def habit_duration_keyboard() -> ReplyKeyboardMarkup:

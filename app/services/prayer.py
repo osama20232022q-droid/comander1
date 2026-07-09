@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import urllib.parse
 import urllib.request
@@ -11,7 +10,7 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.db import get_session
-from app.models import PrayerTimeCache, PrayerManualTime
+from app.models import PrayerTimeCache
 
 BAGHDAD_TZ = ZoneInfo(settings.timezone or "Asia/Baghdad")
 
@@ -42,9 +41,6 @@ FALLBACK_TIMES = {
     "dhuhr": "12:05",
     "maghrib": "18:55",
 }
-
-PRAYER_REMOTE_TIMEOUT = float(os.getenv("PRAYER_REMOTE_TIMEOUT", "2.5"))
-_PRAYER_MEM_CACHE: dict[tuple[str, str], dict[str, str]] = {}
 
 PRAYER_LABELS = {
     "fajr": "صلاة الصبح",
@@ -142,7 +138,7 @@ def fetch_hq_times(governorate: str) -> tuple[dict[str, str], str, str | None]:
     })
     url = f"https://hq.alkafeel.net/Api/init/init.php?{params}"
     try:
-        with urllib.request.urlopen(url, timeout=PRAYER_REMOTE_TIMEOUT) as r:
+        with urllib.request.urlopen(url, timeout=8) as r:
             raw = r.read().decode("utf-8", errors="replace")
         payload = json.loads(raw)
         times = _extract_times(payload)
@@ -154,23 +150,12 @@ def fetch_hq_times(governorate: str) -> tuple[dict[str, str], str, str | None]:
 
 
 def get_prayer_times(governorate: str, now: datetime | None = None) -> dict[str, str]:
-    """Return governorate prayer times with fast memory + DB cache.
-
-    The remote Haqibat al-Mu'min/Alkafeel call is only attempted when no cache
-    exists for that governorate/date, so normal bot replies do not wait on the
-    external site.
-    """
     now = now or datetime.now(BAGHDAD_TZ)
     date_key = now.strftime("%Y-%m-%d")
-    cache_key = (governorate, date_key)
-    if cache_key in _PRAYER_MEM_CACHE:
-        return dict(_PRAYER_MEM_CACHE[cache_key])
     with get_session() as db:
         row = db.scalar(select(PrayerTimeCache).where(PrayerTimeCache.governorate == governorate, PrayerTimeCache.date_key == date_key))
         if row:
-            times = {"fajr": row.fajr, "dhuhr": row.dhuhr, "maghrib": row.maghrib}
-            _PRAYER_MEM_CACHE[cache_key] = times
-            return dict(times)
+            return {"fajr": row.fajr, "dhuhr": row.dhuhr, "maghrib": row.maghrib}
         times, source, raw = fetch_hq_times(governorate)
         row = PrayerTimeCache(
             governorate=governorate,
@@ -183,45 +168,7 @@ def get_prayer_times(governorate: str, now: datetime | None = None) -> dict[str,
         )
         db.add(row)
         db.commit()
-        _PRAYER_MEM_CACHE[cache_key] = times
-        return dict(times)
-
-
-def get_manual_times(user_id: int) -> dict[str, str] | None:
-    with get_session() as db:
-        row = db.scalar(select(PrayerManualTime).where(PrayerManualTime.user_id == user_id))
-        if not row:
-            return None
-        return {"fajr": row.fajr, "dhuhr": row.dhuhr, "maghrib": row.maghrib}
-
-
-def save_manual_times(user_id: int, fajr: str, dhuhr: str, maghrib: str) -> None:
-    with get_session() as db:
-        row = db.scalar(select(PrayerManualTime).where(PrayerManualTime.user_id == user_id))
-        if not row:
-            row = PrayerManualTime(user_id=user_id, fajr=fajr, dhuhr=dhuhr, maghrib=maghrib)
-            db.add(row)
-        else:
-            row.fajr = fajr
-            row.dhuhr = dhuhr
-            row.maghrib = maghrib
-        db.commit()
-
-
-def clear_manual_times(user_id: int) -> None:
-    with get_session() as db:
-        row = db.scalar(select(PrayerManualTime).where(PrayerManualTime.user_id == user_id))
-        if row:
-            db.delete(row)
-            db.commit()
-
-
-def get_prayer_times_for_user(user_id: int | None, governorate: str, now: datetime | None = None) -> dict[str, str]:
-    if user_id is not None:
-        manual = get_manual_times(user_id)
-        if manual:
-            return manual
-    return get_prayer_times(governorate, now)
+        return times
 
 
 def parse_hhmm(date: datetime, hhmm: str) -> datetime:
@@ -229,9 +176,9 @@ def parse_hhmm(date: datetime, hhmm: str) -> datetime:
     return date.replace(hour=h, minute=m, second=0, microsecond=0)
 
 
-def prayer_events_for_day(governorate: str, now: datetime | None = None, user_id: int | None = None) -> list[tuple[str, datetime]]:
+def prayer_events_for_day(governorate: str, now: datetime | None = None) -> list[tuple[str, datetime]]:
     now = now or datetime.now(BAGHDAD_TZ)
-    times = get_prayer_times_for_user(user_id, governorate, now) if user_id is not None else get_prayer_times(governorate, now)
+    times = get_prayer_times(governorate, now)
     return [
         ("fajr", parse_hhmm(now, times["fajr"])),
         ("dhuhr_asr", parse_hhmm(now, times["dhuhr"])),
@@ -239,29 +186,20 @@ def prayer_events_for_day(governorate: str, now: datetime | None = None, user_id
     ]
 
 
-def upcoming_prayer(governorate: str, now: datetime | None = None, user_id: int | None = None) -> tuple[str, datetime] | None:
+def upcoming_prayer(governorate: str, now: datetime | None = None) -> tuple[str, datetime] | None:
     now = now or datetime.now(BAGHDAD_TZ)
-    for key, dt in prayer_events_for_day(governorate, now, user_id=user_id):
+    for key, dt in prayer_events_for_day(governorate, now):
         if dt >= now:
             return key, dt
     # tomorrow fajr
     tomorrow = now + timedelta(days=1)
-    times = get_prayer_times_for_user(user_id, governorate, tomorrow) if user_id is not None else get_prayer_times(governorate, tomorrow)
+    times = get_prayer_times(governorate, tomorrow)
     return "fajr", parse_hhmm(tomorrow, times["fajr"])
 
 
 def seconds_until_next_prayer(governorate: str, now: datetime | None = None) -> tuple[str, int] | None:
     now = now or datetime.now(BAGHDAD_TZ)
     nxt = upcoming_prayer(governorate, now)
-    if not nxt:
-        return None
-    key, dt = nxt
-    return key, int((dt - now).total_seconds())
-
-
-def seconds_until_next_prayer_for_user(user_id: int, governorate: str, now: datetime | None = None) -> tuple[str, int] | None:
-    now = now or datetime.now(BAGHDAD_TZ)
-    nxt = upcoming_prayer(governorate, now, user_id=user_id)
     if not nxt:
         return None
     key, dt = nxt

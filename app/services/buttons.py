@@ -34,14 +34,15 @@ DEFAULT_BUTTONS: list[dict] = [
     {"action_key": "study_plan", "label": "🧠 خطة دراسية معمقة", "scope": "main", "button_type": "reply", "row_order": 1, "col_order": 2, "style": "default"},
     {"action_key": "pomodoro", "label": "⏳ البومودورو", "scope": "main", "button_type": "reply", "row_order": 2, "col_order": 1, "style": "default"},
     {"action_key": "remaining", "label": "⌛ كم المتبقي؟", "scope": "main", "button_type": "reply", "row_order": 2, "col_order": 2, "style": "primary"},
-    {"action_key": "motivate", "label": "🔥 حفزني", "scope": "main", "button_type": "reply", "row_order": 3, "col_order": 1, "style": "default"},
-    {"action_key": "prayer_reminders", "label": "🕌 أذكار الصلاة", "scope": "main", "button_type": "reply", "row_order": 3, "col_order": 2, "style": "success"},
-    {"action_key": "progress", "label": "📊 تقدمي", "scope": "main", "button_type": "reply", "row_order": 4, "col_order": 1, "style": "default"},
-    {"action_key": "certificates", "label": "🏅 شهاداتي", "scope": "main", "button_type": "reply", "row_order": 4, "col_order": 2, "style": "default"},
-    {"action_key": "profile", "label": "👤 ملفي", "scope": "main", "button_type": "reply", "row_order": 5, "col_order": 1, "style": "default"},
-    {"action_key": "inline_buttons", "label": "🔘 الأزرار الشفافة", "scope": "main", "button_type": "reply", "row_order": 5, "col_order": 2, "style": "default"},
-    {"action_key": "help", "label": "❓ ماذا يفعل هذا البوت؟", "scope": "main", "button_type": "reply", "row_order": 6, "col_order": 1, "style": "default"},
-    {"action_key": "manual_settings", "label": "⚙️ ضبط يدوي", "scope": "main", "button_type": "reply", "row_order": 6, "col_order": 2, "style": "primary"},
+    {"action_key": "ai_chat", "label": "🤖 دردشة AI", "scope": "main", "button_type": "reply", "row_order": 3, "col_order": 1, "style": "primary"},
+    {"action_key": "motivate", "label": "🔥 حفزني", "scope": "main", "button_type": "reply", "row_order": 3, "col_order": 2, "style": "default"},
+    {"action_key": "prayer_reminders", "label": "🕌 أذكار الصلاة", "scope": "main", "button_type": "reply", "row_order": 4, "col_order": 1, "style": "success"},
+    {"action_key": "progress", "label": "📊 تقدمي", "scope": "main", "button_type": "reply", "row_order": 4, "col_order": 2, "style": "default"},
+    {"action_key": "certificates", "label": "🏅 شهاداتي", "scope": "main", "button_type": "reply", "row_order": 5, "col_order": 1, "style": "default"},
+    {"action_key": "profile", "label": "👤 ملفي", "scope": "main", "button_type": "reply", "row_order": 5, "col_order": 2, "style": "default"},
+    {"action_key": "inline_buttons", "label": "🔘 الأزرار الشفافة", "scope": "main", "button_type": "reply", "row_order": 6, "col_order": 1, "style": "default"},
+    {"action_key": "help", "label": "❓ ماذا يفعل هذا البوت؟", "scope": "main", "button_type": "reply", "row_order": 6, "col_order": 2, "style": "default"},
+    {"action_key": "manual_settings", "label": "⚙️ ضبط يدوي", "scope": "main", "button_type": "reply", "row_order": 7, "col_order": 1, "style": "primary"},
     {"action_key": "admin_panel", "label": "👑 لوحة الأدمن", "scope": "admin_entry", "button_type": "reply", "row_order": 99, "col_order": 1, "style": "danger"},
 
     # Admin panel
@@ -79,21 +80,15 @@ DEFAULT_BUTTONS: list[dict] = [
 
 
 _DEFAULTS_READY = False
-_BUTTON_CACHE_TTL = float(os.getenv("BUTTON_CACHE_TTL", "300"))
+_BUTTON_CACHE_TTL = float(os.getenv("BUTTON_CACHE_TTL", "30"))
 _BUTTON_CACHE_EXPIRES = 0.0
 _BUTTON_CACHE: list[SimpleNamespace] | None = None
-_BUTTON_CACHE_VERSION = 0
-
-
-def buttons_cache_version() -> int:
-    return _BUTTON_CACHE_VERSION
 
 
 def invalidate_buttons_cache() -> None:
-    global _BUTTON_CACHE, _BUTTON_CACHE_EXPIRES, _BUTTON_CACHE_VERSION
+    global _BUTTON_CACHE, _BUTTON_CACHE_EXPIRES
     _BUTTON_CACHE = None
     _BUTTON_CACHE_EXPIRES = 0.0
-    _BUTTON_CACHE_VERSION += 1
 
 
 def _snapshot_button(b: ButtonConfig) -> SimpleNamespace:
