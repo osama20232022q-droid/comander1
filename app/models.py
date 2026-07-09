@@ -164,3 +164,21 @@ class BackupRecord(Base):
     status: Mapped[str] = mapped_column(String(50), default="created", nullable=False)
     details: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class ButtonConfig(Base):
+    __tablename__ = "button_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    action_key: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    label: Mapped[str] = mapped_column(String(120), nullable=False)
+    scope: Mapped[str] = mapped_column(String(80), default="main", index=True, nullable=False)
+    button_type: Mapped[str] = mapped_column(String(30), default="reply", nullable=False)  # reply / inline
+    row_order: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    col_order: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    style: Mapped[str] = mapped_column(String(30), default="default", nullable=False)  # default/primary/success/danger
+    visible: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    response_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)

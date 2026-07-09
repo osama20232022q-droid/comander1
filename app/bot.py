@@ -9,6 +9,7 @@ from app.db import init_db, get_session
 from app.models import User
 from app.repositories.users_repo import ensure_user
 from app.keyboards import main_keyboard
+from app.services.buttons import action_by_label, inline_custom_keyboard, custom_button_response_by_id, ensure_default_buttons
 from app.handlers.onboarding import start_onboarding, handle_onboarding_text, confirm_onboarding
 from app.handlers.subjects import (
     show_subjects_menu, begin_add_subject, handle_add_subject, open_subject_by_name,
@@ -124,7 +125,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     # Admin flows and admin menu are processed first but only for admin.
-    if is_admin_tg(update.effective_user.id) and (flow in ["admin_activate", "admin_ban", "admin_unban"] or text in ["👥 طلبات التفعيل", "➕ تفعيل مشترك", "📋 المستخدمون", "🚫 حظر مستخدم", "✅ إلغاء الحظر", "📦 نسخة احتياطية الآن", "♻️ فحص ملف استرجاع", "☁️ حالة قاعدة البيانات"]):
+    admin_related = False
+    if is_admin_tg(update.effective_user.id):
+        if flow and (flow.startswith("admin_") or flow.startswith("button_") or flow == "restore_backup"):
+            admin_related = True
+        else:
+            admin_btn = action_by_label(text, scopes=("admin", "admin_buttons", "admin_button_edit", "admin_entry", "both"))
+            admin_related = bool(admin_btn and (admin_btn.scope in ["admin", "admin_buttons", "admin_button_edit", "admin_entry"] or admin_btn.action_key == "admin_panel"))
+    if admin_related:
         if await handle_admin_text(update, context, text):
             return
 
@@ -148,7 +156,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     # Main menu
-    if text == "📚 المواد":
+    main_btn = action_by_label(text, scopes=("main", "both", "admin_entry"))
+    main_action = main_btn.action_key if main_btn else None
+
+    if main_action == "subjects" or text == "📚 المواد":
         await show_subjects_menu(update, context)
     elif text == "➕ إضافة مادة":
         await begin_add_subject(update, context)
@@ -168,28 +179,36 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await list_current_attachments(update, context, "past_question")
         elif action == "analyze":
             await analyze_current_subject(update, context)
-    elif text == "🧠 خطة دراسية معمقة":
+    elif main_action == "study_plan" or text == "🧠 خطة دراسية معمقة":
         await start_plan_flow(update, context)
-    elif text == "⏳ البومودورو":
+    elif main_action == "pomodoro" or text == "⏳ البومودورو":
         await show_pomodoro(update, context)
     elif await handle_pomodoro_text(update, context, text):
         return
-    elif text == "🔥 حفزني":
+    elif main_action == "motivate" or text == "🔥 حفزني":
         await motivate(update, context)
-    elif text == "📊 تقدمي":
+    elif main_action == "progress" or text == "📊 تقدمي":
         await show_progress(update, context)
-    elif text == "🏅 شهاداتي":
+    elif main_action == "certificates" or text == "🏅 شهاداتي":
         await show_certificates(update, context)
     elif await handle_certificate_text(update, context, text):
         return
-    elif text == "👤 ملفي":
+    elif main_action == "profile" or text == "👤 ملفي":
         await show_profile(update, context)
-    elif text == "⌛ كم المتبقي؟":
+    elif main_action == "remaining" or text == "⌛ كم المتبقي؟":
         await show_remaining(update, context)
-    elif text == "❓ ماذا يفعل هذا البوت؟":
+    elif main_action == "help" or text == "❓ ماذا يفعل هذا البوت؟":
         await cmd_help(update, context)
-    elif text == "👑 لوحة الأدمن" and is_admin_tg(update.effective_user.id):
+    elif main_action == "inline_buttons" or text == "🔘 الأزرار الشفافة":
+        kb = inline_custom_keyboard()
+        if not kb:
+            await update.effective_message.reply_text("لا توجد أزرار شفافة مضافة حاليًا.", reply_markup=main_keyboard(is_admin_tg(update.effective_user.id)))
+        else:
+            await update.effective_message.reply_text("🔘 الأزرار الشفافة المضافة:", reply_markup=kb)
+    elif main_action == "admin_panel" and is_admin_tg(update.effective_user.id):
         await show_admin_panel(update, context)
+    elif main_action and main_action.startswith("custom:"):
+        await update.effective_message.reply_text(main_btn.response_text or "هذا زر مخصص بلا نص.", reply_markup=main_keyboard(is_admin_tg(update.effective_user.id)))
     elif text == "↩️ خطوة للوراء":
         await update.effective_message.reply_text("تم الرجوع للقائمة الرئيسية.", reply_markup=main_keyboard(is_admin_tg(update.effective_user.id)))
     else:
@@ -225,7 +244,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if data.startswith("admin:"):
         await handle_admin_callback(update, context, data)
         return
-    await q.answer("هذه النسخة تستخدم أزرار لوحة الكيبورد فقط.", show_alert=True)
+    if data.startswith("custombtn:"):
+        try:
+            button_id = int(data.split(":", 1)[1])
+        except ValueError:
+            await q.answer("زر غير صالح.", show_alert=True)
+            return
+        response = custom_button_response_by_id(button_id)
+        await q.answer()
+        await q.message.reply_text(response or "هذا الزر غير متاح حاليًا.")
+        return
+    await q.answer("هذا الزر لم يعد نشطًا.", show_alert=True)
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -260,6 +289,7 @@ async def main() -> None:
     if not settings.bot_token:
         raise RuntimeError("BOT_TOKEN is missing. Put it in Railway Variables as BOT_TOKEN.")
     init_db()
+    ensure_default_buttons()
     app = Application.builder().token(settings.bot_token).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("menu", go_home))
@@ -271,7 +301,7 @@ async def main() -> None:
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler((filters.Document.ALL | filters.PHOTO | filters.AUDIO | filters.VIDEO) & ~filters.COMMAND, handle_files))
     app.add_error_handler(error_handler)
-    log.info("Study Commander Bot v4 started")
+    log.info("Study Commander Bot v5 admin buttons started")
     await app.initialize()
     await configure_bot_profile(app)
     await app.start()

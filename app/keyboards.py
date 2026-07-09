@@ -7,16 +7,29 @@ def rk(rows: list[list[str]], placeholder: str = "اختر أمرًا") -> Reply
     return ReplyKeyboardMarkup(rows, resize_keyboard=True, one_time_keyboard=False, input_field_placeholder=placeholder)
 
 
+def _dynamic_rows(scope: str, include_admin_entry: bool = False) -> list[list[str]]:
+    try:
+        from app.services.buttons import keyboard_rows_for_scope
+        rows = keyboard_rows_for_scope(scope, include_admin_entry=include_admin_entry)
+        if rows:
+            return rows
+    except Exception:
+        pass
+    return []
+
+
 def main_keyboard(is_admin: bool = False) -> ReplyKeyboardMarkup:
-    rows = [
-        ["📚 المواد", "🧠 خطة دراسية معمقة"],
-        ["⏳ البومودورو", "⌛ كم المتبقي؟"],
-        ["🔥 حفزني", "📊 تقدمي"],
-        ["🏅 شهاداتي", "👤 ملفي"],
-        ["❓ ماذا يفعل هذا البوت؟"],
-    ]
-    if is_admin:
-        rows.append(["👑 لوحة الأدمن"])
+    rows = _dynamic_rows("main", include_admin_entry=is_admin)
+    if not rows:
+        rows = [
+            ["📚 المواد", "🧠 خطة دراسية معمقة"],
+            ["⏳ البومودورو", "⌛ كم المتبقي؟"],
+            ["🔥 حفزني", "📊 تقدمي"],
+            ["🏅 شهاداتي", "👤 ملفي"],
+            ["🔘 الأزرار الشفافة", "❓ ماذا يفعل هذا البوت؟"],
+        ]
+        if is_admin:
+            rows.append(["👑 لوحة الأدمن"])
     return rk(rows)
 
 
@@ -82,10 +95,55 @@ def certificate_keyboard() -> ReplyKeyboardMarkup:
 
 
 def admin_keyboard() -> ReplyKeyboardMarkup:
+    rows = _dynamic_rows("admin")
+    if not rows:
+        rows = [
+            ["👥 طلبات التفعيل", "➕ تفعيل مشترك"],
+            ["📊 إحصائيات النظام", "📋 المستخدمون"],
+            ["🚫 حظر مستخدم", "✅ إلغاء الحظر"],
+            ["🧩 الأزرار", "📦 نسخة احتياطية الآن"],
+            ["♻️ فحص ملف استرجاع", "☁️ حالة قاعدة البيانات"],
+            ["🏠 القائمة الرئيسية"],
+        ]
+    return rk(rows, "لوحة الأدمن")
+
+
+def admin_buttons_keyboard() -> ReplyKeyboardMarkup:
+    rows = _dynamic_rows("admin_buttons")
+    if not rows:
+        rows = [
+            ["✏️ تعديل الأزرار", "🎨 تعديل ألوان الأزرار"],
+            ["➕ زر لوحة كيبورد", "➕ زر شفاف"],
+            ["🗑️ الأزرار المحذوفة", "🔄 استرجاع الأزرار الافتراضية"],
+            ["👑 لوحة الأدمن", "🏠 القائمة الرئيسية"],
+        ]
+    return rk(rows, "إدارة الأزرار")
+
+
+def admin_button_edit_keyboard() -> ReplyKeyboardMarkup:
+    rows = _dynamic_rows("admin_button_edit")
+    if not rows:
+        rows = [
+            ["🗑️ حذف زر معين", "✏️ إعادة تسمية زر معين"],
+            ["➕ إضافة زر معين"],
+            ["↩️ رجوع إلى الأزرار", "👑 لوحة الأدمن"],
+        ]
+    return rk(rows, "تعديل الأزرار")
+
+
+def button_selector_keyboard(rows: list[list[str]], placeholder: str = "اختر زرًا") -> ReplyKeyboardMarkup:
+    if not rows:
+        rows = [["↩️ رجوع إلى الأزرار", "👑 لوحة الأدمن"]]
+    return rk(rows, placeholder)
+
+
+def button_confirm_delete_keyboard() -> ReplyKeyboardMarkup:
+    return rk([["✅ تأكيد حذف الزر", "❌ إلغاء الحذف"], ["↩️ رجوع إلى الأزرار", "👑 لوحة الأدمن"]], "تأكيد الحذف")
+
+
+def button_style_keyboard() -> ReplyKeyboardMarkup:
     return rk([
-        ["👥 طلبات التفعيل", "➕ تفعيل مشترك"],
-        ["📋 المستخدمون", "🚫 حظر مستخدم"],
-        ["✅ إلغاء الحظر", "📦 نسخة احتياطية الآن"],
-        ["♻️ فحص ملف استرجاع", "☁️ حالة قاعدة البيانات"],
-        ["🏠 القائمة الرئيسية"],
-    ], "لوحة الأدمن")
+        ["⚪ عادي", "🔵 أزرق"],
+        ["🟢 أخضر", "🔴 أحمر"],
+        ["↩️ رجوع إلى الأزرار", "👑 لوحة الأدمن"],
+    ], "اختر نمط الزر")

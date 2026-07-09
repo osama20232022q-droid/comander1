@@ -1,47 +1,59 @@
-# V4 Fix Specification
+# V5 Spec — Admin Button Manager
 
-## Keyboard System
-All user-facing buttons are ReplyKeyboardMarkup. Inline callbacks are retained only for backward compatibility with old messages.
+## Admin Stats
 
-## Deep Study Plan
-The plan generator now uses:
-- page/lecture count provided by student
-- study level
-- target grade
-- exam type
-- question pattern
-- days left
-- material attachment count and past-question count
-- medical-study multiplier
+زر `📊 إحصائيات النظام` يعرض للأدمن فقط:
 
-Raw student request JSON is removed from final HTML.
+- إجمالي المستخدمين.
+- المشتركين/المفعلين.
+- بانتظار التفعيل.
+- المحظورين.
+- الاشتراكات المنتهية.
+- عدد المواد والملفات والخطط والجلسات والشهادات.
+- آخر المحظورين.
 
-## Pomodoro
-- Reply keyboard only
-- presets + custom time
-- active session saved in database
-- `/remaining` and `⌛ كم المتبقي؟` show seconds and progress bar
-- automatic finish job sends break recommendation
+## Button Manager
 
-## Certificates
-Certificates are earned, not freely generated.
-- Daily certificate: at least 3 focused study hours today or a day stronger than recent average.
-- Weekly certificate: 5 active days + 10 hours in last 7 days, or 20 sessions.
-- Heat stamp removed; replaced by English bot signature.
+داخل `👑 لوحة الأدمن` يوجد زر `🧩 الأزرار`.
 
-## Admin
-Admin-only features:
-- pending users
-- manual activation by Telegram ID / username
-- ban user
-- unban user
-- backup export
-- backup file check
-- DB status
+### خيارات إدارة الأزرار
 
-No admin button is shown to subscribers.
+- `✏️ تعديل الأزرار`
+  - `🗑️ حذف زر معين`
+  - `✏️ إعادة تسمية زر معين`
+  - `➕ إضافة زر معين`
+- `🎨 تعديل ألوان الأزرار`
+- `➕ زر لوحة كيبورد`
+- `➕ زر شفاف`
+- `🗑️ الأزرار المحذوفة`
+- `🔄 استرجاع الأزرار الافتراضية`
 
-## Motivation
-- 25 quotes in JSON.
-- Avoids repeating last 20 quote keys when possible.
-- Includes Quranic-style short motivation inspired by the uploaded PDF asset.
+### منع الحذف الخطأ
+
+عملية حذف الزر منفصلة عن الإضافة والتسمية:
+
+1. اختيار حذف زر معين.
+2. اختيار الزر.
+3. شاشة تأكيد مستقلة.
+4. الزر ينتقل إلى الأزرار المحذوفة ويمكن استرجاعه.
+
+## Database
+
+أضيف جدول:
+
+```text
+button_configs
+```
+
+يحفظ:
+
+- action_key
+- label
+- scope
+- button_type: reply/inline
+- row_order / col_order
+- style: default/primary/success/danger
+- visible
+- deleted_at
+- response_text للأزرار المخصصة
+```
