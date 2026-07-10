@@ -121,7 +121,7 @@ def _post_gemini(system_text: str, contents: list[dict[str, Any]], generation_co
             ),
         )
 
-    model = getattr(settings, "gemini_model", "") or os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+    model = getattr(settings, "gemini_model", "") or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     url = f"{GEMINI_API_URL}/{model}:generateContent?key={api_key}"
 
     payload: dict[str, Any] = {
