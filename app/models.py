@@ -196,6 +196,18 @@ class PrayerTimeCache(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
+class PrayerManualTime(Base):
+    __tablename__ = "prayer_manual_times"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True, nullable=False)
+    fajr: Mapped[str] = mapped_column(String(10), nullable=False)
+    dhuhr: Mapped[str] = mapped_column(String(10), nullable=False)
+    maghrib: Mapped[str] = mapped_column(String(10), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+
 class ButtonConfig(Base):
     __tablename__ = "button_configs"
 
