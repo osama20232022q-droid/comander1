@@ -102,23 +102,21 @@ def _post_gemini(payload: dict[str, Any]) -> AIResult:
             msg = body[:200]
         return AIResult(False, f"خطأ من خدمة الذكاء الاصطناعي ({e.code}): {msg}", str(e.code))
     except Exception as e:
-        return AIResult(False, f"فشل الاتصال: {e}")
+        return AIResult(False, f"فشل الاتصال بخوادم الذكاء الاصطناعي: {e}")
 
 
 async def generate_ai_reply(
     user_id: int, user_text: str, context_messages: list[dict[str, str]], profile_context: str, mode: str
 ) -> AIResult:
     if not AI_CHAT_ENABLED:
-        return AIResult(False, "🤖 دردشة AI غير مفعلة مؤقتًا.")
+        return AIResult(False, "🤖 دردشة AI غير مفعلة مؤقتًا من قبل الإدارة.")
 
     if not GEMINI_API_KEY:
-        # قمت بتغيير الرسالة هنا لتكون مميزة، لتعرف فوراً إذا كان الكود الجديد قد تم رفعه بنجاح أم لا.
+        # رسالة احترافية تظهر في حال نسيان إضافة المفتاح
         return AIResult(
             False,
-            "❌ [تحديث جيمناي يعمل الآن!]\n\n"
-            "لكن دردشة AI غير مفعلة لأن مفتاح GEMINI_API_KEY غير مضاف.\n"
-            "يرجى الذهاب إلى إعدادات Railway (Variables) وإضافة:\n"
-            "GEMINI_API_KEY=AIzaSy...\n"
+            "🤖 خدمة الذكاء الاصطناعي غير مفعلة حالياً.\n"
+            "(ملاحظة للإدارة: يرجى إضافة مفتاح GEMINI_API_KEY في إعدادات Railway لكي يعمل البوت)"
         )
 
     allowed, _, _ = usage_available(user_id)
