@@ -25,8 +25,8 @@ class Settings:
     signature: str = os.getenv("BOT_SIGNATURE", "Study Commander Bot").strip()
     database_url: str = os.getenv("DATABASE_URL", "").strip()
     database_path: str = os.getenv("DATABASE_PATH", "/data/study_commander.sqlite3").strip()
-    openai_api_key: str = os.getenv("OPENAI_API_KEY", "").strip()
-    openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4.1-mini").strip()
+    gemini_api_key: str = os.getenv("GEMINI_API_KEY", "").strip()
+    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash").strip()
     backup_keep_days: int = int(os.getenv("BACKUP_KEEP_DAYS", "30") or "30")
 
     def __post_init__(self):
