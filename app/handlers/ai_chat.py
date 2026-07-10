@@ -102,14 +102,27 @@ async def handle_ai_chat_text(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     mode = context.user_data.get("ai_mode", "study")
     hist = _history(context)
-    await update.effective_message.reply_text("⏳ جاري التفكير...", reply_markup=ai_chat_keyboard())
-    result = await generate_ai_reply(
-        user_id=update.effective_user.id,
-        user_text=text,
-        context_messages=hist,
-        profile_context=_profile_context(update),
-        mode=mode,
-    )
+    thinking_msg = await update.effective_message.reply_text("⏳ جاري التفكير...", reply_markup=ai_chat_keyboard())
+    try:
+        result = await generate_ai_reply(
+            user_id=update.effective_user.id,
+            user_text=text,
+            context_messages=hist,
+            profile_context=_profile_context(update),
+            mode=mode,
+        )
+    except Exception as e:
+        result = None
+        try:
+            await thinking_msg.delete()
+        except Exception:
+            pass
+        await update.effective_message.reply_text(
+            f"🤖 صار خطأ غير متوقع بالاتصال بالذكاء الاصطناعي. جرّب مرة ثانية بعد شوي.\n(تفاصيل تقنية: {e})",
+            reply_markup=ai_chat_keyboard(),
+        )
+        return True
+
     if result.ok:
         hist.append({"role": "user", "content": clean_text(text, 1200)})
         hist.append({"role": "assistant", "content": clean_text(result.text, 1600)})
@@ -151,7 +164,7 @@ async def handle_ai_chat_file(update: Update, context: ContextTypes.DEFAULT_TYPE
         await msg.reply_text(f"تعذر تنزيل/قراءة الملف: {e}", reply_markup=ai_chat_keyboard())
         return True
 
-    if not extracted or extracted.startswith("[تعذر"):
+    if not extracted or extracted.startswith("["):
         await msg.reply_text(
             (extracted or "ما قدرت أستخرج نص واضح من الملف.") + "\n\nأرسل النص يدويًا أو PDF واضح النص.",
             reply_markup=ai_chat_keyboard(),
@@ -159,13 +172,20 @@ async def handle_ai_chat_file(update: Update, context: ContextTypes.DEFAULT_TYPE
         return True
 
     prompt = "اشرح هذا الملف بعمق وطلّع منه نقاط امتحانية وMCQ وShort essay:\n\n" + extracted
-    result = await generate_ai_reply(
-        user_id=update.effective_user.id,
-        user_text=prompt,
-        context_messages=_history(context),
-        profile_context=_profile_context(update),
-        mode="medical",
-    )
+    try:
+        result = await generate_ai_reply(
+            user_id=update.effective_user.id,
+            user_text=prompt,
+            context_messages=_history(context),
+            profile_context=_profile_context(update),
+            mode="medical",
+        )
+    except Exception as e:
+        await msg.reply_text(
+            f"🤖 صار خطأ غير متوقع أثناء تحليل الملف. جرّب مرة ثانية بعد شوي.\n(تفاصيل تقنية: {e})",
+            reply_markup=ai_chat_keyboard(),
+        )
+        return True
     for part in split_reply(result.text):
         await msg.reply_text(part, reply_markup=ai_chat_keyboard())
     return True
