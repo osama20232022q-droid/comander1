@@ -21,9 +21,9 @@ AI_MAX_INPUT_CHARS = int(os.getenv("AI_MAX_INPUT_CHARS", "3500") or "3500")
 AI_MAX_FILE_CHARS = int(os.getenv("AI_MAX_FILE_CHARS", "12000") or "12000")
 AI_REQUEST_TIMEOUT = int(os.getenv("AI_REQUEST_TIMEOUT", "45") or "45")
 
-# تم التحديث إلى الموديل الأقوى gemini-1.5-pro
+# تم التحديث إلى الموديل gemini-1.5-flash لضمان عمله على الحسابات المجانية بدون أخطاء
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-pro").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip()
 GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
 
 # In-memory usage limiter. It resets when the bot restarts.
