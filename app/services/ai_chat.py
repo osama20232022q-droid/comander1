@@ -112,12 +112,13 @@ async def generate_ai_reply(
         return AIResult(False, "🤖 دردشة AI غير مفعلة مؤقتًا.")
 
     if not GEMINI_API_KEY:
+        # قمت بتغيير الرسالة هنا لتكون مميزة، لتعرف فوراً إذا كان الكود الجديد قد تم رفعه بنجاح أم لا.
         return AIResult(
             False,
-            "🤖 دردشة AI غير مفعلة لأن GEMINI_API_KEY غير مضاف.\n\n"
-            "أضفه في Railway Variables:\n"
+            "❌ [تحديث جيمناي يعمل الآن!]\n\n"
+            "لكن دردشة AI غير مفعلة لأن مفتاح GEMINI_API_KEY غير مضاف.\n"
+            "يرجى الذهاب إلى إعدادات Railway (Variables) وإضافة:\n"
             "GEMINI_API_KEY=AIzaSy...\n"
-            "GEMINI_MODEL=gemini-1.5-pro"
         )
 
     allowed, _, _ = usage_available(user_id)
