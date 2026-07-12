@@ -3,14 +3,14 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
 
 from app.config import settings
 from app.db import get_session
-from app.models import User, StudentProfile
+from app.models import StudentProfile, User
 
 
 @dataclass(frozen=True)
@@ -102,11 +102,7 @@ def get_access_snapshot(tg_user: Any) -> AccessSnapshot:
                 db.commit()
                 db.refresh(user)
 
-        profile_confirmed = bool(
-            db.scalar(
-                select(StudentProfile.confirmed).where(StudentProfile.user_id == user.id)
-            )
-        )
+        profile_confirmed = bool(db.scalar(select(StudentProfile.confirmed).where(StudentProfile.user_id == user.id)))
         snapshot = _make_snapshot(user, profile_confirmed)
 
     _CACHE[tg_id] = (now + _TTL, snapshot)
@@ -119,6 +115,6 @@ def access_is_valid(snapshot: AccessSnapshot) -> bool:
         return True
     if snapshot.is_banned or not snapshot.is_active:
         return False
-    if snapshot.access_until and snapshot.access_until < datetime.now(timezone.utc):
+    if snapshot.access_until and snapshot.access_until < datetime.now(UTC):
         return False
     return True

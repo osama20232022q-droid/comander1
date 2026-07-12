@@ -1,40 +1,88 @@
 from __future__ import annotations
 
-from sqlalchemy import select, func
+from datetime import timedelta
+
+from sqlalchemy import func, select
 from telegram import Update
 from telegram.ext import ContextTypes
 
 from app.db import get_session
-from app.keyboards import profile_keyboard, confirm_back_keyboard, nav_keyboard, main_keyboard
-from app.models import User, Subject, Attachment, PomodoroSession, FoodLog, StudyPlan, Certificate
-from app.repositories.users_repo import save_profile
-from app.utils import validate_triple_name, normalize_text, parse_health, classify_college
 from app.handlers.admin import is_admin_tg
+from app.keyboards import confirm_back_keyboard, main_keyboard, nav_keyboard, profile_keyboard
+from app.models import (
+    Attachment,
+    Certificate,
+    DailyDisciplineReport,
+    FoodLog,
+    PomodoroSession,
+    StudyPlan,
+    Subject,
+    User,
+)
+from app.repositories.users_repo import save_profile
+from app.utils import classify_college, local_now, normalize_text, parse_health, validate_triple_name
 
 
 async def show_progress(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    end_date = local_now().date()
+    start_date = end_date - timedelta(days=6)
     with get_session() as db:
         user = db.scalar(select(User).where(User.telegram_id == update.effective_user.id))
         if not user:
             return
         subjects = db.scalar(select(func.count()).select_from(Subject).where(Subject.user_id == user.id)) or 0
         files = db.scalar(select(func.count()).select_from(Attachment).where(Attachment.user_id == user.id)) or 0
-        sessions = db.scalars(select(PomodoroSession).where(PomodoroSession.user_id == user.id, PomodoroSession.status == "finished")).all()
+        sessions = db.scalars(
+            select(PomodoroSession).where(PomodoroSession.user_id == user.id, PomodoroSession.status == "finished")
+        ).all()
         hours = sum(s.study_minutes for s in sessions) / 60
         plans = db.scalar(select(func.count()).select_from(StudyPlan).where(StudyPlan.user_id == user.id)) or 0
         certs = db.scalar(select(func.count()).select_from(Certificate).where(Certificate.user_id == user.id)) or 0
         foods = db.scalar(select(func.count()).select_from(FoodLog).where(FoodLog.user_id == user.id)) or 0
-    score = min(100, int(hours * 4 + subjects * 5 + plans * 8 + certs * 5))
+        reports = list(
+            db.scalars(
+                select(DailyDisciplineReport)
+                .where(
+                    DailyDisciplineReport.user_id == user.id,
+                    DailyDisciplineReport.date_key >= start_date.isoformat(),
+                    DailyDisciplineReport.date_key <= end_date.isoformat(),
+                )
+                .order_by(DailyDisciplineReport.date_key)
+            ).all()
+        )
+    legacy_score = min(100, int(hours * 4 + subjects * 5 + plans * 8 + certs * 5))
+    if reports:
+        avg_score = round(sum(r.score for r in reports) / len(reports))
+        green = sum(1 for r in reports if r.status == "green")
+        yellow = sum(1 for r in reports if r.status == "yellow")
+        red = sum(1 for r in reports if r.status == "red")
+        total_minutes = sum(r.theory_minutes + r.practical_minutes for r in reports)
+        total_mcq = sum(r.mcq_total for r in reports)
+        total_correct = sum(r.mcq_correct for r in reports)
+        accuracy = (total_correct / total_mcq * 100) if total_mcq else 0
+        last = reports[-1]
+        report_block = (
+            f"\n\n🪖 قيادة آخر 7 أيام\n"
+            f"التقارير المسجلة: {len(reports)}/7\n"
+            f"متوسط الانضباط: {avg_score}/100\n"
+            f"الأيام: {green} أخضر · {yellow} أصفر · {red} أحمر\n"
+            f"الدراسة المسجلة: {total_minutes / 60:.1f} ساعة\n"
+            f"MCQ: {total_correct}/{total_mcq} — دقة {accuracy:.0f}%\n"
+            f"آخر يوم: {last.date_key} — {last.score}/100"
+        )
+    else:
+        report_block = "\n\n🪖 لم تسجل تقرير انضباط بعد. افتح غرفة العمليات وسجل تقرير اليوم."
     await update.effective_message.reply_text(
-        "📊 تقرير تقدمك\n\n"
+        "📊 مركز التقدم الشامل\n\n"
         f"المواد: {subjects}\n"
         f"الملفات/الملحقات: {files}\n"
-        f"جلسات الدراسة المنجزة: {len(sessions)}\n"
-        f"الساعات الصافية: {hours:.1f}\n"
+        f"جلسات البومودورو المنجزة: {len(sessions)}\n"
+        f"ساعات المؤقت الصافية: {hours:.1f}\n"
         f"الخطط الدراسية: {plans}\n"
-        f"سجلات الأكل داخل البومودورو: {foods}\n"
+        f"سجلات الأكل: {foods}\n"
         f"الشهادات: {certs}\n"
-        f"Discipline Score تقريبي: {score}/100"
+        f"مؤشر الإنجاز العام: {legacy_score}/100"
+        f"{report_block}"
     )
 
 
@@ -67,7 +115,10 @@ async def start_profile_edit(update: Update, context: ContextTypes.DEFAULT_TYPE)
         user = db.scalar(select(User).where(User.telegram_id == update.effective_user.id))
         profile = user.profile if user else None
     if not profile:
-        await update.effective_message.reply_text("لا يوجد ملف طالب لتعديله. ابدأ /start من جديد.", reply_markup=main_keyboard(is_admin_tg(update.effective_user.id)))
+        await update.effective_message.reply_text(
+            "لا يوجد ملف طالب لتعديله. ابدأ /start من جديد.",
+            reply_markup=main_keyboard(is_admin_tg(update.effective_user.id)),
+        )
         return
 
     context.user_data["flow"] = "profile_edit"
@@ -98,7 +149,10 @@ async def handle_profile_edit_text(update: Update, context: ContextTypes.DEFAULT
 
     if text == "🏠 القائمة الرئيسية":
         context.user_data.clear()
-        await msg.reply_text("تم إلغاء التعديل والرجوع للقائمة الرئيسية.", reply_markup=main_keyboard(is_admin_tg(update.effective_user.id)))
+        await msg.reply_text(
+            "تم إلغاء التعديل والرجوع للقائمة الرئيسية.",
+            reply_markup=main_keyboard(is_admin_tg(update.effective_user.id)),
+        )
         return True
 
     if text in ["↩️ خطوة للوراء", "🔴 رجوع للتعديل"]:
@@ -128,7 +182,9 @@ async def handle_profile_edit_text(update: Update, context: ContextTypes.DEFAULT
         draft["study_domain"] = domain
         draft["specialty"] = specialty
         context.user_data["step"] = "stage"
-        await msg.reply_text(f"تم تحليل الكلية: {specialty}\n\nاكتب مرحلتك الجديدة. مثال: مرحلة أولى / ثانية / ثالثة...")
+        await msg.reply_text(
+            f"تم تحليل الكلية: {specialty}\n\nاكتب مرحلتك الجديدة. مثال: مرحلة أولى / ثانية / ثالثة..."
+        )
         return True
 
     if step == "stage":
@@ -138,12 +194,7 @@ async def handle_profile_edit_text(update: Update, context: ContextTypes.DEFAULT
             return True
         draft["stage"] = stage
         context.user_data["step"] = "health"
-        await msg.reply_text(
-            "المعلومات الصحية اختيارية.\n"
-            "اكتب: العمر الطول الوزن\n"
-            "مثال: 20 170 75\n"
-            "أو اكتب: تخطي"
-        )
+        await msg.reply_text("المعلومات الصحية اختيارية.\nاكتب: العمر الطول الوزن\nمثال: 20 170 75\nأو اكتب: تخطي")
         return True
 
     if step == "health":
@@ -179,7 +230,9 @@ async def _profile_edit_go_back(update: Update, context: ContextTypes.DEFAULT_TY
         "health": "اكتب العمر الطول الوزن أو تخطي.",
         "review": "راجع معلوماتك ثم أكد.",
     }
-    await update.effective_message.reply_text(prompts.get(context.user_data.get("step"), "اكتب البيانات."), reply_markup=nav_keyboard())
+    await update.effective_message.reply_text(
+        prompts.get(context.user_data.get("step"), "اكتب البيانات."), reply_markup=nav_keyboard()
+    )
 
 
 async def _show_profile_edit_review(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -214,8 +267,7 @@ async def _confirm_profile_edit(update: Update, context: ContextTypes.DEFAULT_TY
         role_is_admin = user.role == "admin"
     context.user_data.clear()
     await update.effective_message.reply_text(
-        "✅ تم تحديث معلوماتك بنجاح.\n\n"
-        f"تحليل التخصص: {profile.specialty}",
+        f"✅ تم تحديث معلوماتك بنجاح.\n\nتحليل التخصص: {profile.specialty}",
         reply_markup=main_keyboard(role_is_admin),
     )
     return True

@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from sqlalchemy import (
-    BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, Text,
-    UniqueConstraint, Index
-)
+from datetime import UTC, datetime
+
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Base(DeclarativeBase):
@@ -29,10 +27,12 @@ class User(Base):
     access_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     pending_food_session_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
 
-    profile: Mapped["StudentProfile"] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
-    subjects: Mapped[list["Subject"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    profile: Mapped[StudentProfile] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
+    subjects: Mapped[list[Subject]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class StudentProfile(Base):
@@ -64,7 +64,7 @@ class Subject(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     user: Mapped[User] = relationship(back_populates="subjects")
-    attachments: Mapped[list["Attachment"]] = relationship(back_populates="subject", cascade="all, delete-orphan")
+    attachments: Mapped[list[Attachment]] = relationship(back_populates="subject", cascade="all, delete-orphan")
 
 
 class Attachment(Base):
@@ -119,7 +119,9 @@ class FoodLog(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
-    session_id: Mapped[int | None] = mapped_column(ForeignKey("pomodoro_sessions.id", ondelete="SET NULL"), nullable=True)
+    session_id: Mapped[int | None] = mapped_column(
+        ForeignKey("pomodoro_sessions.id", ondelete="SET NULL"), nullable=True
+    )
     description: Mapped[str] = mapped_column(Text, nullable=False)
     calories_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
     calories_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -170,7 +172,9 @@ class PrayerSetting(Base):
     __tablename__ = "prayer_settings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True, nullable=False)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True, nullable=False
+    )
     enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     governorate: Mapped[str | None] = mapped_column(String(100), nullable=True)
     include_ayah: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -178,7 +182,9 @@ class PrayerSetting(Base):
     last_sent_dhuhr_asr: Mapped[str | None] = mapped_column(String(20), nullable=True)
     last_sent_maghrib_isha: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
 
 
 class PrayerTimeCache(Base):
@@ -200,12 +206,16 @@ class PrayerManualTime(Base):
     __tablename__ = "prayer_manual_times"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True, nullable=False)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True, nullable=False
+    )
     fajr: Mapped[str] = mapped_column(String(10), nullable=False)
     dhuhr: Mapped[str] = mapped_column(String(10), nullable=False)
     maghrib: Mapped[str] = mapped_column(String(10), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
 
 
 class ButtonConfig(Base):
@@ -223,7 +233,9 @@ class ButtonConfig(Base):
     response_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
 
 
 class HabitPlan(Base):
@@ -240,7 +252,9 @@ class HabitPlan(Base):
     current_streak: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="active", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
 
 
 class RoutinePlan(Base):
@@ -255,4 +269,51 @@ class RoutinePlan(Base):
     duration_days: Mapped[int] = mapped_column(Integer, default=14, nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="trial", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+
+class DailyDisciplineReport(Base):
+    __tablename__ = "daily_discipline_reports"
+    __table_args__ = (
+        UniqueConstraint("user_id", "date_key", name="uq_daily_discipline_user_date"),
+        Index("ix_daily_discipline_user_date", "user_id", "date_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    date_key: Mapped[str] = mapped_column(String(20), nullable=False)
+    sleep_time: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    wake_time: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    sleep_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    phone_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    theory_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    practical_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    mcq_total: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    mcq_correct: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    essay_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    review_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    score: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="red", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+
+class AIUsageDaily(Base):
+    __tablename__ = "ai_usage_daily"
+    __table_args__ = (
+        UniqueConstraint("telegram_id", "date_key", name="uq_ai_usage_telegram_date"),
+        Index("ix_ai_usage_telegram_date", "telegram_id", "date_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    date_key: Mapped[str] = mapped_column(String(20), nullable=False)
+    request_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )

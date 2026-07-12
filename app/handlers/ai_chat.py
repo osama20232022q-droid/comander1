@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from app.keyboards import main_keyboard, rk
+from app.config import settings
 from app.handlers.admin import is_admin_tg
+from app.keyboards import main_keyboard, rk
 from app.services.ai_chat import (
     AI_CONTEXT_MESSAGES,
     clean_text,
@@ -22,15 +25,19 @@ AI_EXPLAIN_BUTTON = "🧠 اشرحلي"
 AI_MCQ_BUTTON = "📝 MCQ"
 AI_ESSAY_BUTTON = "✍️ Short essay"
 AI_MEDICAL_BUTTON = "🩺 فهم طبي"
+AI_TEST_BUTTON = "🧪 فحص Gemini"
 
 
 def ai_chat_keyboard():
-    return rk([
-        [AI_EXPLAIN_BUTTON, AI_MCQ_BUTTON],
-        [AI_ESSAY_BUTTON, AI_MEDICAL_BUTTON],
-        [AI_CLEAR_BUTTON],
-        [AI_EXIT_BUTTON, "🏠 القائمة الرئيسية"],
-    ], "اكتب سؤالك للذكاء الاصطناعي")
+    return rk(
+        [
+            [AI_EXPLAIN_BUTTON, AI_MCQ_BUTTON],
+            [AI_ESSAY_BUTTON, AI_MEDICAL_BUTTON],
+            [AI_CLEAR_BUTTON, AI_TEST_BUTTON],
+            [AI_EXIT_BUTTON, "🏠 القائمة الرئيسية"],
+        ],
+        "اكتب سؤالك للذكاء الاصطناعي",
+    )
 
 
 def _history(context: ContextTypes.DEFAULT_TYPE) -> list[dict[str, str]]:
@@ -85,6 +92,29 @@ async def handle_ai_chat_text(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text == AI_CLEAR_BUTTON:
         await clear_ai_context(update, context)
         return True
+    if text == AI_TEST_BUTTON:
+        thinking = await update.effective_message.reply_text("🧪 أفحص اتصال Gemini...", reply_markup=ai_chat_keyboard())
+        try:
+            result = await generate_ai_reply(
+                user_id=update.effective_user.id,
+                user_text="أجب بكلمتين فقط: الاتصال يعمل",
+                context_messages=[],
+                profile_context="",
+                mode="study",
+            )
+        except Exception:
+            result = None
+            await update.effective_message.reply_text(
+                "❌ فشل اختبار Gemini. راجع Railway Logs أو إعدادات المفتاح والموديل.", reply_markup=ai_chat_keyboard()
+            )
+        try:
+            await thinking.delete()
+        except Exception:
+            pass
+        if result is not None:
+            prefix = "✅ Gemini يعمل" if result.ok else "❌ Gemini لا يعمل"
+            await update.effective_message.reply_text(f"{prefix}\n\n{result.text}", reply_markup=ai_chat_keyboard())
+        return True
 
     mode_map = {
         AI_EXPLAIN_BUTTON: "explain",
@@ -111,14 +141,14 @@ async def handle_ai_chat_text(update: Update, context: ContextTypes.DEFAULT_TYPE
             profile_context=_profile_context(update),
             mode=mode,
         )
-    except Exception as e:
+    except Exception:
         result = None
         try:
             await thinking_msg.delete()
         except Exception:
             pass
         await update.effective_message.reply_text(
-            f"🤖 صار خطأ غير متوقع بالاتصال بالذكاء الاصطناعي. جرّب مرة ثانية بعد شوي.\n(تفاصيل تقنية: {e})",
+            "🤖 صار خطأ غير متوقع بالاتصال بالذكاء الاصطناعي. جرّب مرة ثانية بعد شوي.",
             reply_markup=ai_chat_keyboard(),
         )
         return True
@@ -126,7 +156,7 @@ async def handle_ai_chat_text(update: Update, context: ContextTypes.DEFAULT_TYPE
     if result.ok:
         hist.append({"role": "user", "content": clean_text(text, 1200)})
         hist.append({"role": "assistant", "content": clean_text(result.text, 1600)})
-        del hist[:-AI_CONTEXT_MESSAGES * 2]
+        del hist[: -AI_CONTEXT_MESSAGES * 2]
     for part in split_reply(result.text):
         await update.effective_message.reply_text(part, reply_markup=ai_chat_keyboard())
     return True
@@ -141,28 +171,51 @@ async def handle_ai_chat_file(update: Update, context: ContextTypes.DEFAULT_TYPE
     file_id = None
     file_name = None
     if msg.document:
+        if msg.document.file_size and msg.document.file_size > settings.ai_max_file_bytes:
+            max_mb = settings.ai_max_file_bytes / (1024 * 1024)
+            await msg.reply_text(
+                f"حجم الملف أكبر من الحد المسموح ({max_mb:.1f} MB). أرسل ملفًا أصغر.", reply_markup=ai_chat_keyboard()
+            )
+            return True
         file_id = msg.document.file_id
         file_name = msg.document.file_name
     elif msg.photo:
-        await msg.reply_text("حاليًا قراءة الصور تحتاج Vision API. اكتب النص الظاهر بالصورة أو أرسل PDF/ملف نصي.", reply_markup=ai_chat_keyboard())
+        await msg.reply_text(
+            "حاليًا قراءة الصور تحتاج Vision API. اكتب النص الظاهر بالصورة أو أرسل PDF/ملف نصي.",
+            reply_markup=ai_chat_keyboard(),
+        )
         return True
     elif msg.audio:
-        await msg.reply_text("استلمت صوت، لكن التفريغ الصوتي غير مفعل في هذا الباتش. أرسل نص المحاضرة أو PDF.", reply_markup=ai_chat_keyboard())
+        await msg.reply_text(
+            "استلمت صوت، لكن التفريغ الصوتي غير مفعل في هذا الباتش. أرسل نص المحاضرة أو PDF.",
+            reply_markup=ai_chat_keyboard(),
+        )
         return True
     elif msg.video:
-        await msg.reply_text("استلمت فيديو، لكن تحليل الفيديو غير مفعل. أرسل النص أو PDF حتى أشرحه.", reply_markup=ai_chat_keyboard())
+        await msg.reply_text(
+            "استلمت فيديو، لكن تحليل الفيديو غير مفعل. أرسل النص أو PDF حتى أشرحه.", reply_markup=ai_chat_keyboard()
+        )
         return True
 
     if not file_id:
         await msg.reply_text("نوع الملف غير مدعوم في دردشة AI حاليًا.", reply_markup=ai_chat_keyboard())
         return True
 
+    path: str | None = None
     try:
         path = await download_telegram_file(context.bot, file_id, file_name)
         extracted = await extract_document_text(path, file_name)
-    except Exception as e:
-        await msg.reply_text(f"تعذر تنزيل/قراءة الملف: {e}", reply_markup=ai_chat_keyboard())
+    except Exception:
+        await msg.reply_text(
+            "تعذر تنزيل أو قراءة الملف. جرّب ملفًا أصغر أو بصيغة PDF/TXT واضحة.", reply_markup=ai_chat_keyboard()
+        )
         return True
+    finally:
+        if path:
+            try:
+                Path(path).unlink(missing_ok=True)
+            except OSError:
+                pass
 
     if not extracted or extracted.startswith("["):
         await msg.reply_text(
@@ -180,9 +233,9 @@ async def handle_ai_chat_file(update: Update, context: ContextTypes.DEFAULT_TYPE
             profile_context=_profile_context(update),
             mode="medical",
         )
-    except Exception as e:
+    except Exception:
         await msg.reply_text(
-            f"🤖 صار خطأ غير متوقع أثناء تحليل الملف. جرّب مرة ثانية بعد شوي.\n(تفاصيل تقنية: {e})",
+            "🤖 صار خطأ غير متوقع أثناء تحليل الملف. جرّب مرة ثانية بعد شوي.",
             reply_markup=ai_chat_keyboard(),
         )
         return True

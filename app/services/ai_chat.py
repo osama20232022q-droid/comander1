@@ -4,7 +4,6 @@ import asyncio
 import json
 import os
 import re
-import socket
 import tempfile
 import urllib.error
 import urllib.request
@@ -12,8 +11,13 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
+
+from sqlalchemy import select
 
 from app.config import settings
+from app.db import get_session
+from app.models import AIUsageDaily
 
 AI_CHAT_ENABLED = os.getenv("AI_CHAT_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
 AI_DAILY_LIMIT = int(os.getenv("AI_DAILY_LIMIT", "30") or "30")
@@ -23,29 +27,14 @@ AI_MAX_FILE_CHARS = int(os.getenv("AI_MAX_FILE_CHARS", "12000") or "12000")
 AI_REQUEST_TIMEOUT = int(os.getenv("AI_REQUEST_TIMEOUT", "90") or "90")
 AI_MAX_RETRIES_PER_MODEL = int(os.getenv("AI_MAX_RETRIES_PER_MODEL", "2") or "2")
 AI_RETRY_BACKOFF_SECONDS = float(os.getenv("AI_RETRY_BACKOFF_SECONDS", "2") or "2")
-GEMINI_API_URL = os.getenv(
-    "GEMINI_API_URL", "https://generativelanguage.googleapis.com/v1beta/models"
-).strip()
+GEMINI_API_URL = os.getenv("GEMINI_API_URL", "https://generativelanguage.googleapis.com/v1beta/interactions").strip()
 
 # Error codes that are worth retrying (transient) either on the same model or the next one.
 _RETRYABLE_ERROR_CODES = {"timeout", "rate_limited", "server_error", "connection_error"}
 # Error codes that should trigger a jump to the next fallback model rather than retrying blindly.
 _MODEL_SWITCH_ERROR_CODES = {"model_not_found", "rate_limited", "server_error"}
 
-# In-memory usage limiter. It resets when the bot restarts. It is intentional: fast and simple.
-_USAGE: dict[tuple[int, str], int] = {}
-_USAGE_LAST_CLEAN: dict[str, str] = {"date": ""}
-
-
-def _prune_usage() -> None:
-    """Drop usage entries from previous days so the dict doesn't grow forever."""
-    today = date.today().isoformat()
-    if _USAGE_LAST_CLEAN["date"] == today:
-        return
-    _USAGE_LAST_CLEAN["date"] = today
-    stale_keys = [key for key in _USAGE if key[1] != today]
-    for key in stale_keys:
-        _USAGE.pop(key, None)
+# AI usage is persisted in the database so restarts do not reset limits.
 
 
 @dataclass
@@ -116,20 +105,44 @@ def split_reply(text: str, limit: int = 3600) -> list[str]:
 
 
 def usage_available(user_id: int) -> tuple[bool, int, int]:
-    _prune_usage()
     today = date.today().isoformat()
-    used = _USAGE.get((user_id, today), 0)
+    with get_session() as db:
+        row = db.scalar(
+            select(AIUsageDaily).where(
+                AIUsageDaily.telegram_id == user_id,
+                AIUsageDaily.date_key == today,
+            )
+        )
+        used = int(row.request_count) if row else 0
     return used < AI_DAILY_LIMIT, used, AI_DAILY_LIMIT
 
 
 def increment_usage(user_id: int) -> None:
-    _prune_usage()
     today = date.today().isoformat()
-    key = (user_id, today)
-    _USAGE[key] = _USAGE.get(key, 0) + 1
+    with get_session() as db:
+        row = db.scalar(
+            select(AIUsageDaily).where(
+                AIUsageDaily.telegram_id == user_id,
+                AIUsageDaily.date_key == today,
+            )
+        )
+        if row is None:
+            row = AIUsageDaily(telegram_id=user_id, date_key=today, request_count=1)
+            db.add(row)
+        else:
+            row.request_count += 1
+        db.commit()
 
 
-def _post_gemini(model: str, system_text: str, contents: list[dict[str, Any]], generation_config: dict[str, Any]) -> AIResult:
+def _post_gemini(
+    model: str, system_text: str, contents: list[dict[str, Any]], generation_config: dict[str, Any]
+) -> AIResult:
+    """Call the current Gemini Interactions API in stateless mode.
+
+    The old bot called ``models/{model}:generateContent`` directly. That API is
+    still supported, but the Interactions endpoint is the recommended interface
+    for current Gemini models and gives clearer model compatibility.
+    """
     api_key = getattr(settings, "gemini_api_key", "") or os.getenv("GEMINI_API_KEY", "")
     if not api_key:
         return AIResult(
@@ -137,146 +150,115 @@ def _post_gemini(model: str, system_text: str, contents: list[dict[str, Any]], g
             error_code="missing_key",
             text=(
                 "🤖 دردشة AI غير مفعلة لأن GEMINI_API_KEY غير مضاف.\n\n"
-                "أضفه في Railway Variables (مجاني من Google AI Studio):\n"
+                "أضفه في Railway Variables:\n"
                 "GEMINI_API_KEY=AIza...\n"
                 "GEMINI_MODEL=gemini-3.5-flash"
             ),
         )
 
-    # Catch obvious copy-paste mistakes early instead of sending a doomed request.
     if not re.match(r"^[A-Za-z0-9_\-]{20,}$", api_key):
         return AIResult(
             ok=False,
             error_code="invalid_key_format",
             text=(
-                "🤖 قيمة GEMINI_API_KEY غير صحيحة الشكل (يبدو فيها مسافات/رموز غريبة أو ناقصة).\n"
-                "تأكد إنك نسخت المفتاح كامل من Google AI Studio بدون مسافات إضافية."
+                "🤖 قيمة GEMINI_API_KEY غير صحيحة الشكل.\n"
+                "انسخ المفتاح كاملًا من Google AI Studio بدون فراغات أو علامات اقتباس."
             ),
         )
-
     if not model:
-        return AIResult(ok=False, error_code="no_model", text="لا يوجد اسم موديل محدد للاتصال بـ Gemini.")
+        return AIResult(False, "لا يوجد اسم موديل محدد للاتصال بـ Gemini.", "no_model")
 
-    url = f"{GEMINI_API_URL}/{model}:generateContent?key={api_key}"
+    transcript: list[str] = []
+    for item in contents:
+        role = "المساعد" if item.get("role") == "model" else "الطالب"
+        parts = item.get("parts") or []
+        text = "".join(str(p.get("text", "")) for p in parts if isinstance(p, dict)).strip()
+        if text:
+            transcript.append(f"{role}: {text}")
+    input_text = "\n\n".join(transcript)
 
     payload: dict[str, Any] = {
-        "contents": contents,
-        "systemInstruction": {"parts": [{"text": system_text}]},
-        "generationConfig": generation_config,
-        "safetySettings": [
-            {"category": c, "threshold": "BLOCK_ONLY_HIGH"}
-            for c in (
-                "HARM_CATEGORY_HARASSMENT",
-                "HARM_CATEGORY_HATE_SPEECH",
-                "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                "HARM_CATEGORY_DANGEROUS_CONTENT",
-            )
-        ],
+        "model": model,
+        "input": input_text,
+        "system_instruction": system_text,
+        "store": False,
+        "generation_config": {
+            "temperature": generation_config.get("temperature", 0.25),
+            "max_output_tokens": generation_config.get(
+                "maxOutputTokens", generation_config.get("max_output_tokens", 1800)
+            ),
+        },
     }
-
     try:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     except (TypeError, ValueError) as e:
-        return AIResult(ok=False, error_code="encode_error", text=f"تعذر تجهيز الطلب لخدمة AI: {e}")
+        return AIResult(False, f"تعذر تجهيز الطلب لخدمة AI: {e}", "encode_error")
 
+    parsed_url = urlparse(GEMINI_API_URL)
+    if parsed_url.scheme != "https" or parsed_url.hostname != "generativelanguage.googleapis.com":
+        return AIResult(False, "GEMINI_API_URL غير آمن أو غير رسمي. استخدم رابط Google الرسمي فقط.", "unsafe_api_url")
     req = urllib.request.Request(
-        url,
+        GEMINI_API_URL,
         data=data,
         method="POST",
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
     )
-
     try:
-        with urllib.request.urlopen(req, timeout=AI_REQUEST_TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=AI_REQUEST_TIMEOUT) as resp:  # nosec B310
             raw = resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as e:
         try:
-            body = e.read().decode("utf-8", errors="replace")[:1200]
+            body = e.read().decode("utf-8", errors="replace")[:1400]
         except Exception:
             body = str(e)
         if e.code == 404:
-            return AIResult(ok=False, error_code="model_not_found", text=f"صار خطأ من خدمة AI: {e.code}\n{body}")
+            return AIResult(
+                False, f"الموديل {model} غير متاح لهذا المفتاح أو المنطقة.\n{body[:500]}", "model_not_found"
+            )
         if e.code == 429:
             return AIResult(
-                ok=False,
-                error_code="rate_limited",
-                text="🤖 وصلنا حد الطلبات المجاني المؤقت من Gemini (429). راح أجرب موديل ثاني أو انتظر شوي وحاول مرة ثانية.",
+                False, "🤖 وصل حد Gemini المؤقت. سأجرب موديلًا بديلًا؛ وإن استمر انتظر قليلًا.", "rate_limited"
             )
         if e.code in (401, 403):
             return AIResult(
-                ok=False,
-                error_code="auth_error",
-                text=(
-                    "🤖 مفتاح GEMINI_API_KEY مرفوض من جوجل (غير صحيح أو ملغى أو ناقص صلاحيات).\n"
-                    "تأكد إنك مسوي مفتاح جديد من https://aistudio.google.com/apikey وحاطه صح."
-                ),
+                False,
+                "🤖 مفتاح Gemini مرفوض أو المشروع غير مسموح له باستخدام الخدمة. أنشئ مفتاحًا جديدًا من AI Studio.",
+                "auth_error",
             )
         if e.code == 400:
-            return AIResult(
-                ok=False,
-                error_code="bad_request",
-                text=f"🤖 طلب غير صالح لخدمة AI (400). التفاصيل:\n{body[:500]}",
-            )
+            return AIResult(False, f"🤖 طلب Gemini غير صالح (400).\n{body[:700]}", "bad_request")
         if e.code in (500, 502, 503, 504):
-            return AIResult(
-                ok=False,
-                error_code="server_error",
-                text="🤖 خدمة Gemini عندها ضغط أو مشكلة مؤقتة من طرفهم. راح أجرب موديل بديل أو حاول بعد شوي.",
-            )
-        return AIResult(ok=False, error_code="http_error", text=f"صار خطأ من خدمة AI: {e.code}\n{body}")
-    except (TimeoutError, socket.timeout):
-        return AIResult(ok=False, error_code="timeout", text="صار خطأ اتصال بالذكاء الاصطناعي: انتهت مهلة الاتصال.")
+            return AIResult(False, "🤖 خدمة Gemini عندها مشكلة مؤقتة. سأجرب موديلًا بديلًا.", "server_error")
+        return AIResult(False, f"صار خطأ من Gemini: HTTP {e.code}\n{body[:700]}", "http_error")
+    except TimeoutError:
+        return AIResult(False, "انتهت مهلة الاتصال بـ Gemini.", "timeout")
     except (urllib.error.URLError, ConnectionError, OSError) as e:
         reason = getattr(e, "reason", e)
-        text = str(reason).lower()
-        if "timed out" in text or "timeout" in text:
-            return AIResult(ok=False, error_code="timeout", text="صار خطأ اتصال بالذكاء الاصطناعي: انتهت مهلة الاتصال.")
-        return AIResult(ok=False, error_code="connection_error", text=f"تعذر الاتصال بخدمة AI (مشكلة شبكة): {reason}")
+        return AIResult(False, f"تعذر الاتصال بـ Gemini: {reason}", "connection_error")
     except Exception as e:
-        error_code = "timeout" if "timed out" in str(e).lower() else "request_error"
-        return AIResult(ok=False, error_code=error_code, text=f"صار خطأ اتصال بالذكاء الاصطناعي: {e}")
+        return AIResult(False, f"صار خطأ اتصال غير متوقع بـ Gemini: {e}", "request_error")
 
     try:
         obj = json.loads(raw)
     except (json.JSONDecodeError, ValueError):
-        return AIResult(ok=False, error_code="bad_json", text="🤖 رجع رد غير مفهوم من خدمة AI. جرّب مرة ثانية.")
-
+        return AIResult(False, "رجع Gemini ردًا غير مفهوم.", "bad_json")
     if not isinstance(obj, dict):
-        return AIResult(ok=False, error_code="bad_json", text="🤖 رجع رد بصيغة غير متوقعة من خدمة AI.")
+        return AIResult(False, "رجع Gemini ردًا بصيغة غير متوقعة.", "bad_json")
 
-    candidates = obj.get("candidates") or []
-    if not candidates:
-        reason = (obj.get("promptFeedback") or {}).get("blockReason", "unknown")
-        if reason and reason != "unknown":
-            return AIResult(
-                ok=False,
-                error_code="blocked",
-                text=f"🤖 Gemini رفض الرد على هذا الطلب لأسباب تتعلق بسياسة المحتوى (السبب: {reason}). جرّب صياغة مختلفة.",
-            )
-        return AIResult(ok=False, error_code="empty_response", text="🤖 ما رجع Gemini أي جواب. جرّب مرة ثانية.")
-
-    first = candidates[0] if isinstance(candidates[0], dict) else {}
-    finish_reason = first.get("finishReason", "")
-    content_obj = first.get("content") or {}
-    parts = content_obj.get("parts") or []
-    content = "".join(p.get("text", "") for p in parts if isinstance(p, dict)).strip()
-
+    content = str(obj.get("output_text") or "").strip()
     if not content:
-        if finish_reason in {"SAFETY", "RECITATION", "PROHIBITED_CONTENT", "BLOCKLIST"}:
-            return AIResult(
-                ok=False,
-                error_code="blocked",
-                text="🤖 Gemini ما گدر يجاوب على هذا الطلب بسبب سياسات المحتوى. جرّب تعيد صياغة سؤالك.",
-            )
-        if finish_reason == "MAX_TOKENS":
-            return AIResult(
-                ok=False,
-                error_code="truncated",
-                text="🤖 الجواب طلع طويل وانقطع قبل يخلص. جرّب تسأل عن جزء أصغر أو أوضح.",
-            )
-        return AIResult(ok=False, error_code="empty_response", text="🤖 ما رجع Gemini جواب واضح. جرّب صياغة السؤال مرة ثانية.")
-
-    return AIResult(ok=True, text=content)
+        chunks: list[str] = []
+        for step in obj.get("steps") or []:
+            if not isinstance(step, dict) or step.get("type") != "model_output":
+                continue
+            for part in step.get("content") or []:
+                if isinstance(part, dict) and part.get("type") == "text" and part.get("text"):
+                    chunks.append(str(part["text"]))
+        content = "\n".join(chunks).strip()
+    if not content:
+        status = obj.get("status", "unknown")
+        return AIResult(False, f"Gemini لم يرجع نصًا واضحًا. حالة الطلب: {status}", "empty_response")
+    return AIResult(True, content)
 
 
 async def generate_ai_reply(
@@ -296,7 +278,9 @@ async def generate_ai_reply(
 
     allowed, used, limit = usage_available(user_id)
     if not allowed:
-        return AIResult(False, f"وصلت حد دردشة AI اليومي: {used}/{limit}. جرّب باچر أو اطلب من الأدمن يرفع الحد.", "daily_limit")
+        return AIResult(
+            False, f"وصلت حد دردشة AI اليومي: {used}/{limit}. جرّب باچر أو اطلب من الأدمن يرفع الحد.", "daily_limit"
+        )
 
     instruction = MODE_PREFIXES.get(mode, MODE_PREFIXES["study"])
     context_messages = (context_messages or [])[-AI_CONTEXT_MESSAGES:]
@@ -322,7 +306,9 @@ async def generate_ai_reply(
     primary_model = getattr(settings, "gemini_model", "") or os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
     fallback_models = [
         m.strip()
-        for m in os.getenv("GEMINI_FALLBACK_MODELS", "gemini-3-flash-preview,gemini-3.1-flash-lite,gemini-2.5-flash").split(",")
+        for m in os.getenv(
+            "GEMINI_FALLBACK_MODELS", "gemini-3-flash-preview,gemini-3.1-flash-lite,gemini-2.5-flash"
+        ).split(",")
         if m.strip() and m.strip() != primary_model
     ]
     # de-duplicate while preserving order

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
 from app.config import settings
-from app.models import User, StudentProfile, AdminAction
+from app.models import AdminAction, StudentProfile, User
 from app.utils import classify_college
 
 
@@ -26,6 +28,7 @@ def ensure_user(db: Session, tg_user) -> User:
             db.commit()
             try:
                 from app.services.access_cache import invalidate_user_access
+
                 invalidate_user_access(tg_user.id)
             except Exception:
                 pass
@@ -43,6 +46,7 @@ def ensure_user(db: Session, tg_user) -> User:
     db.refresh(user)
     try:
         from app.services.access_cache import invalidate_user_access
+
         invalidate_user_access(tg_user.id)
     except Exception:
         pass
@@ -53,7 +57,15 @@ def save_profile(db: Session, user: User, draft: dict) -> StudentProfile:
     domain, specialty = classify_college(draft["college"])
     profile = user.profile
     if not profile:
-        profile = StudentProfile(user_id=user.id, full_name=draft["full_name"], college=draft["college"], specialty=specialty, study_domain=domain, stage=draft["stage"], confirmed=True)
+        profile = StudentProfile(
+            user_id=user.id,
+            full_name=draft["full_name"],
+            college=draft["college"],
+            specialty=specialty,
+            study_domain=domain,
+            stage=draft["stage"],
+            confirmed=True,
+        )
         db.add(profile)
     profile.full_name = draft["full_name"]
     profile.college = draft["college"]
@@ -68,6 +80,7 @@ def save_profile(db: Session, user: User, draft: dict) -> StudentProfile:
     db.refresh(profile)
     try:
         from app.services.access_cache import invalidate_user_access
+
         invalidate_user_access(user.telegram_id)
     except Exception:
         pass
@@ -80,13 +93,14 @@ def activate_user(db: Session, admin: User, target_id: int, days: int | None = N
         return None
     target.is_active = True
     if days:
-        target.access_until = datetime.now(timezone.utc) + timedelta(days=days)
+        target.access_until = datetime.now(UTC) + timedelta(days=days)
     else:
         target.access_until = None
     db.add(AdminAction(admin_user_id=admin.id, target_user_id=target.id, action="activate", details=f"days={days}"))
     db.commit()
     try:
         from app.services.access_cache import invalidate_user_access
+
         invalidate_user_access(target.telegram_id)
     except Exception:
         pass
@@ -102,6 +116,7 @@ def ban_user(db: Session, admin: User, target_id: int, banned: bool = True) -> U
     db.commit()
     try:
         from app.services.access_cache import invalidate_user_access
+
         invalidate_user_access(target.telegram_id)
     except Exception:
         pass

@@ -1,30 +1,53 @@
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
-from datetime import datetime, timedelta, timezone
-from sqlalchemy import select, func
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import func, select
 from telegram import Update
 from telegram.ext import ContextTypes
 
 from app.config import settings
-from app.db import get_session, DATABASE_URL
-from app.models import (
-    User, Subject, Attachment, BackupRecord, StudyPlan, PomodoroSession,
-    Certificate, FoodLog, MotivationLog, AdminAction, ButtonConfig
-)
+from app.db import DATABASE_URL, get_session
 from app.keyboards import (
-    admin_keyboard, nav_keyboard, admin_buttons_keyboard, admin_button_edit_keyboard,
-    button_selector_keyboard, button_confirm_delete_keyboard, button_style_keyboard,
-    button_order_scope_keyboard
+    admin_button_edit_keyboard,
+    admin_buttons_keyboard,
+    admin_keyboard,
+    button_confirm_delete_keyboard,
+    button_order_scope_keyboard,
+    button_selector_keyboard,
+    button_style_keyboard,
+    nav_keyboard,
 )
-from app.services.backup import export_database_to_json
+from app.models import (
+    Attachment,
+    BackupRecord,
+    ButtonConfig,
+    Certificate,
+    FoodLog,
+    MotivationLog,
+    PomodoroSession,
+    StudyPlan,
+    Subject,
+    User,
+)
+from app.services.backup import decode_backup_bytes, export_database
 from app.services.buttons import (
-    action_by_label, all_visible_buttons, button_selector_rows, delete_button,
-    deleted_buttons, restore_button, rename_button, set_button_style,
-    add_custom_button, restore_default_visibility, display_label, PROTECTED_ACTIONS,
-    buttons_for_exact_scope, set_button_position
+    PROTECTED_ACTIONS,
+    action_by_label,
+    add_custom_button,
+    all_visible_buttons,
+    button_selector_rows,
+    buttons_for_exact_scope,
+    delete_button,
+    deleted_buttons,
+    display_label,
+    rename_button,
+    restore_button,
+    restore_default_visibility,
+    set_button_position,
+    set_button_style,
 )
+from app.services.temp_files import temporary_path
 
 
 def is_admin_tg(tg_id: int) -> bool:
@@ -121,14 +144,19 @@ async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         return True
     if action == "admin_unban":
         context.user_data["flow"] = "admin_unban"
-        await update.effective_message.reply_text("أرسل Telegram ID أو username لإلغاء الحظر.", reply_markup=nav_keyboard())
+        await update.effective_message.reply_text(
+            "أرسل Telegram ID أو username لإلغاء الحظر.", reply_markup=nav_keyboard()
+        )
         return True
     if action == "admin_backup":
         await backup_now(update, context)
         return True
     if action == "admin_restore_check":
         context.user_data["flow"] = "restore_backup"
-        await update.effective_message.reply_text("أرسل ملف backup JSON كوثيقة حتى أفحصه. الاسترجاع التلقائي غير مفعل حمايةً للبيانات.", reply_markup=nav_keyboard())
+        await update.effective_message.reply_text(
+            "أرسل ملف backup JSON كوثيقة حتى أفحصه. الاسترجاع التلقائي غير مفعل حمايةً للبيانات.",
+            reply_markup=nav_keyboard(),
+        )
         return True
     if action == "admin_db_status":
         await db_status(update, context)
@@ -144,7 +172,10 @@ async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     if action == "admin_button_colors":
         context.user_data["flow"] = "button_color_select"
         buttons = all_visible_buttons()
-        await update.effective_message.reply_text("🎨 اختر الزر الذي تريد تعديل نمطه/لونه:", reply_markup=button_selector_keyboard(button_selector_rows(buttons)))
+        await update.effective_message.reply_text(
+            "🎨 اختر الزر الذي تريد تعديل نمطه/لونه:",
+            reply_markup=button_selector_keyboard(button_selector_rows(buttons)),
+        )
         return True
     if action == "admin_button_order":
         context.user_data["flow"] = "button_order_scope"
@@ -169,26 +200,28 @@ async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         context.user_data["flow"] = "button_delete_select"
         buttons = [b for b in all_visible_buttons() if b.action_key not in PROTECTED_ACTIONS]
         await update.effective_message.reply_text(
-            "🗑️ اختر الزر الذي تريد حذفه/إخفاءه.\n"
-            "لن يتم الحذف مباشرة؛ ستظهر لك شاشة تأكيد مستقلة.",
+            "🗑️ اختر الزر الذي تريد حذفه/إخفاءه.\nلن يتم الحذف مباشرة؛ ستظهر لك شاشة تأكيد مستقلة.",
             reply_markup=button_selector_keyboard(button_selector_rows(buttons)),
         )
         return True
     if action == "admin_rename_button":
         context.user_data["flow"] = "button_rename_select"
         buttons = all_visible_buttons()
-        await update.effective_message.reply_text("✏️ اختر الزر الذي تريد إعادة تسميته:", reply_markup=button_selector_keyboard(button_selector_rows(buttons)))
+        await update.effective_message.reply_text(
+            "✏️ اختر الزر الذي تريد إعادة تسميته:", reply_markup=button_selector_keyboard(button_selector_rows(buttons))
+        )
         return True
     if action == "admin_deleted_buttons":
         await show_deleted_buttons(update, context)
         return True
     if action == "admin_restore_defaults":
         restore_default_visibility()
-        await update.effective_message.reply_text("✅ تم استرجاع الأزرار الافتراضية للنظام.", reply_markup=admin_buttons_keyboard())
+        await update.effective_message.reply_text(
+            "✅ تم استرجاع الأزرار الافتراضية للنظام.", reply_markup=admin_buttons_keyboard()
+        )
         return True
 
     return False
-
 
 
 def _match_button_from_list(text: str, buttons: list[ButtonConfig]) -> ButtonConfig | None:
@@ -242,19 +275,25 @@ async def handle_admin_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         }
         scope = scope_map.get(text)
         if not scope:
-            await update.effective_message.reply_text("اختر شاشة من الأزرار فقط.", reply_markup=button_order_scope_keyboard())
+            await update.effective_message.reply_text(
+                "اختر شاشة من الأزرار فقط.", reply_markup=button_order_scope_keyboard()
+            )
             return True
         context.user_data["order_scope"] = scope
         context.user_data["flow"] = "button_order_select"
         buttons = buttons_for_exact_scope(scope)
         if not buttons:
-            await update.effective_message.reply_text("لا توجد أزرار قابلة للترتيب في هذه الشاشة.", reply_markup=admin_buttons_keyboard())
+            await update.effective_message.reply_text(
+                "لا توجد أزرار قابلة للترتيب في هذه الشاشة.", reply_markup=admin_buttons_keyboard()
+            )
             context.user_data.pop("flow", None)
             return True
         lines = ["اختر الزر الذي تريد تغيير مكانه:", ""]
         for b in buttons:
             lines.append(f"{display_label(b)}  — الصف {b.row_order} / العمود {b.col_order}")
-        await update.effective_message.reply_text("\n".join(lines), reply_markup=button_selector_keyboard(button_selector_rows(buttons)))
+        await update.effective_message.reply_text(
+            "\n".join(lines), reply_markup=button_selector_keyboard(button_selector_rows(buttons))
+        )
         return True
 
     if flow == "button_order_select":
@@ -262,7 +301,9 @@ async def handle_admin_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         buttons = buttons_for_exact_scope(scope)
         selected = _match_button_from_list(text, buttons)
         if not selected:
-            await update.effective_message.reply_text("اختر زرًا من القائمة فقط.", reply_markup=button_selector_keyboard(button_selector_rows(buttons)))
+            await update.effective_message.reply_text(
+                "اختر زرًا من القائمة فقط.", reply_markup=button_selector_keyboard(button_selector_rows(buttons))
+            )
             return True
         context.user_data["order_action_key"] = selected.action_key
         context.user_data["order_label"] = display_label(selected)
@@ -291,7 +332,9 @@ async def handle_admin_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         return True
 
     if flow == "button_delete_select":
-        selected = action_by_label(text, scopes=("main", "admin", "admin_buttons", "admin_button_edit", "admin_entry", "both"))
+        selected = action_by_label(
+            text, scopes=("main", "admin", "admin_buttons", "admin_button_edit", "admin_entry", "both")
+        )
         if not selected:
             await update.effective_message.reply_text("لم أتعرف على الزر. اختر من القائمة فقط.")
             return True
@@ -310,24 +353,32 @@ async def handle_admin_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             ok, msg = delete_button(context.user_data.get("delete_action_key", ""))
             context.user_data.pop("flow", None)
             context.user_data.pop("delete_action_key", None)
-            await update.effective_message.reply_text(("✅ " if ok else "⚠️ ") + msg, reply_markup=admin_buttons_keyboard())
+            await update.effective_message.reply_text(
+                ("✅ " if ok else "⚠️ ") + msg, reply_markup=admin_buttons_keyboard()
+            )
             return True
         if text == "❌ إلغاء الحذف":
             context.user_data.pop("flow", None)
             context.user_data.pop("delete_action_key", None)
             await update.effective_message.reply_text("تم إلغاء الحذف.", reply_markup=admin_buttons_keyboard())
             return True
-        await update.effective_message.reply_text("اختر تأكيد الحذف أو إلغاء الحذف فقط.", reply_markup=button_confirm_delete_keyboard())
+        await update.effective_message.reply_text(
+            "اختر تأكيد الحذف أو إلغاء الحذف فقط.", reply_markup=button_confirm_delete_keyboard()
+        )
         return True
 
     if flow == "button_rename_select":
-        selected = action_by_label(text, scopes=("main", "admin", "admin_buttons", "admin_button_edit", "admin_entry", "both"))
+        selected = action_by_label(
+            text, scopes=("main", "admin", "admin_buttons", "admin_button_edit", "admin_entry", "both")
+        )
         if not selected:
             await update.effective_message.reply_text("اختر زرًا من القائمة فقط.")
             return True
         context.user_data["rename_action_key"] = selected.action_key
         context.user_data["flow"] = "button_rename_value"
-        await update.effective_message.reply_text(f"اكتب الاسم الجديد للزر:\n{display_label(selected)}", reply_markup=nav_keyboard())
+        await update.effective_message.reply_text(
+            f"اكتب الاسم الجديد للزر:\n{display_label(selected)}", reply_markup=nav_keyboard()
+        )
         return True
 
     if flow == "button_rename_value":
@@ -338,13 +389,17 @@ async def handle_admin_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         return True
 
     if flow == "button_color_select":
-        selected = action_by_label(text, scopes=("main", "admin", "admin_buttons", "admin_button_edit", "admin_entry", "both"))
+        selected = action_by_label(
+            text, scopes=("main", "admin", "admin_buttons", "admin_button_edit", "admin_entry", "both")
+        )
         if not selected:
             await update.effective_message.reply_text("اختر زرًا من القائمة فقط.")
             return True
         context.user_data["style_action_key"] = selected.action_key
         context.user_data["flow"] = "button_color_value"
-        await update.effective_message.reply_text(f"اختر لون/نمط الزر:\n{display_label(selected)}", reply_markup=button_style_keyboard())
+        await update.effective_message.reply_text(
+            f"اختر لون/نمط الزر:\n{display_label(selected)}", reply_markup=button_style_keyboard()
+        )
         return True
 
     if flow == "button_color_value":
@@ -361,11 +416,15 @@ async def handle_admin_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     if flow == "button_add_label":
         context.user_data["new_button_label"] = text.strip()
         context.user_data["flow"] = "button_add_response"
-        await update.effective_message.reply_text("اكتب النص الذي يرسله البوت عند ضغط هذا الزر:", reply_markup=nav_keyboard())
+        await update.effective_message.reply_text(
+            "اكتب النص الذي يرسله البوت عند ضغط هذا الزر:", reply_markup=nav_keyboard()
+        )
         return True
 
     if flow == "button_add_response":
-        ok, msg = add_custom_button(context.user_data.get("new_button_label", ""), text, context.user_data.get("new_button_type", "reply"))
+        ok, msg = add_custom_button(
+            context.user_data.get("new_button_label", ""), text, context.user_data.get("new_button_type", "reply")
+        )
         context.user_data.pop("flow", None)
         context.user_data.pop("new_button_label", None)
         context.user_data.pop("new_button_type", None)
@@ -419,12 +478,15 @@ async def activate_by_input(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     with get_session() as db:
         target = _find_user(db, token)
         if not target:
-            await update.effective_message.reply_text("المستخدم غير موجود بقاعدة البيانات. لازم يفتح البوت مرة أولًا ويرسل /start.", reply_markup=admin_keyboard())
+            await update.effective_message.reply_text(
+                "المستخدم غير موجود بقاعدة البيانات. لازم يفتح البوت مرة أولًا ويرسل /start.",
+                reply_markup=admin_keyboard(),
+            )
             context.user_data.pop("flow", None)
             return
         target.is_active = True
         target.is_banned = False
-        target.access_until = None if days is None else datetime.now(timezone.utc) + timedelta(days=days)
+        target.access_until = None if days is None else datetime.now(UTC) + timedelta(days=days)
         db.commit()
         tg_id = target.telegram_id
     context.user_data.pop("flow", None)
@@ -448,12 +510,19 @@ async def ban_by_input(update: Update, context: ContextTypes.DEFAULT_TYPE, text:
             target.is_active = False
         db.commit()
     context.user_data.pop("flow", None)
-    await update.effective_message.reply_text("تم الحظر." if banned else "تم إلغاء الحظر.", reply_markup=admin_keyboard())
+    await update.effective_message.reply_text(
+        "تم الحظر." if banned else "تم إلغاء الحظر.", reply_markup=admin_keyboard()
+    )
 
 
 async def pending_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     with get_session() as db:
-        users = db.scalars(select(User).where(User.is_active == False, User.is_banned == False, User.role != "admin").order_by(User.created_at.desc()).limit(20)).all()
+        users = db.scalars(
+            select(User)
+            .where(User.is_active.is_(False), User.is_banned.is_(False), User.role != "admin")
+            .order_by(User.created_at.desc())
+            .limit(20)
+        ).all()
     if not users:
         await update.effective_message.reply_text("لا توجد طلبات تفعيل.", reply_markup=admin_keyboard())
         return
@@ -479,14 +548,31 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 async def system_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     with get_session() as db:
         total = db.scalar(select(func.count()).select_from(User)) or 0
-        active = db.scalar(select(func.count()).select_from(User).where(User.is_active == True, User.is_banned == False)) or 0
-        pending = db.scalar(select(func.count()).select_from(User).where(User.is_active == False, User.is_banned == False, User.role != "admin")) or 0
-        banned = db.scalar(select(func.count()).select_from(User).where(User.is_banned == True)) or 0
+        active = (
+            db.scalar(select(func.count()).select_from(User).where(User.is_active.is_(True), User.is_banned.is_(False)))
+            or 0
+        )
+        pending = (
+            db.scalar(
+                select(func.count())
+                .select_from(User)
+                .where(User.is_active.is_(False), User.is_banned.is_(False), User.role != "admin")
+            )
+            or 0
+        )
+        banned = db.scalar(select(func.count()).select_from(User).where(User.is_banned.is_(True))) or 0
         admins = db.scalar(select(func.count()).select_from(User).where(User.role == "admin")) or 0
-        expired = db.scalar(select(func.count()).select_from(User).where(User.access_until.is_not(None), User.access_until < now, User.is_banned == False)) or 0
+        expired = (
+            db.scalar(
+                select(func.count())
+                .select_from(User)
+                .where(User.access_until.is_not(None), User.access_until < now, User.is_banned.is_(False))
+            )
+            or 0
+        )
         subjects = db.scalar(select(func.count()).select_from(Subject)) or 0
         files = db.scalar(select(func.count()).select_from(Attachment)) or 0
         plans = db.scalar(select(func.count()).select_from(StudyPlan)) or 0
@@ -495,8 +581,12 @@ async def system_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         food = db.scalar(select(func.count()).select_from(FoodLog)) or 0
         motivations = db.scalar(select(func.count()).select_from(MotivationLog)) or 0
         buttons = db.scalar(select(func.count()).select_from(ButtonConfig)) or 0
-        deleted_btns = db.scalar(select(func.count()).select_from(ButtonConfig).where(ButtonConfig.deleted_at.is_not(None))) or 0
-        banned_users = db.scalars(select(User).where(User.is_banned == True).order_by(User.updated_at.desc()).limit(10)).all()
+        deleted_btns = (
+            db.scalar(select(func.count()).select_from(ButtonConfig).where(ButtonConfig.deleted_at.is_not(None))) or 0
+        )
+        banned_users = db.scalars(
+            select(User).where(User.is_banned.is_(True)).order_by(User.updated_at.desc()).limit(10)
+        ).all()
     lines = [
         "📊 إحصائيات النظام",
         "",
@@ -534,22 +624,44 @@ async def show_deleted_buttons(update: Update, context: ContextTypes.DEFAULT_TYP
     lines = ["🗑️ الأزرار المحذوفة", "اختر زرًا من القائمة لاسترجاعه:"]
     for b in buttons[:20]:
         lines.append(f"• {b.label} — النوع: {b.button_type} — القسم: {b.scope}")
-    await update.effective_message.reply_text("\n".join(lines), reply_markup=button_selector_keyboard(button_selector_rows(buttons)))
+    await update.effective_message.reply_text(
+        "\n".join(lines), reply_markup=button_selector_keyboard(button_selector_rows(buttons))
+    )
 
 
 async def backup_now(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = Path(tempfile.gettempdir()) / f"study_commander_backup_{ts}.json"
     try:
-        export_database_to_json(path)
-        with get_session() as db:
-            admin = db.scalar(select(User).where(User.telegram_id == update.effective_user.id))
-            if admin:
-                db.add(BackupRecord(admin_user_id=admin.id, file_name=path.name, status="created", details="telegram_export"))
-                db.commit()
-        await update.effective_message.reply_document(path.open("rb"), filename=path.name, caption="📦 نسخة احتياطية JSON. هذا الزر أدمن فقط.", reply_markup=admin_keyboard())
-    except Exception as e:
-        await update.effective_message.reply_text(f"فشل إنشاء النسخة الاحتياطية: {e}", reply_markup=admin_keyboard())
+        with temporary_path(suffix=".json", prefix=f"study_commander_backup_{ts}_") as base_path:
+            exported_path, encrypted = export_database(base_path)
+            try:
+                with get_session() as db:
+                    admin = db.scalar(select(User).where(User.telegram_id == update.effective_user.id))
+                    if admin:
+                        details = "telegram_export_encrypted" if encrypted else "telegram_export_plain"
+                        db.add(
+                            BackupRecord(
+                                admin_user_id=admin.id, file_name=exported_path.name, status="created", details=details
+                            )
+                        )
+                        db.commit()
+                caption = (
+                    "🔐 نسخة احتياطية مشفرة. احتفظ بمفتاح BACKUP_ENCRYPTION_KEY بمكان آمن."
+                    if encrypted
+                    else "⚠️ نسخة احتياطية غير مشفرة. أضف BACKUP_ENCRYPTION_KEY لحمايتها."
+                )
+                with exported_path.open("rb") as fh:
+                    await update.effective_message.reply_document(
+                        fh, filename=exported_path.name, caption=caption, reply_markup=admin_keyboard()
+                    )
+            finally:
+                if exported_path != base_path:
+                    exported_path.unlink(missing_ok=True)
+    except Exception:
+        await update.effective_message.reply_text(
+            "فشل إنشاء النسخة الاحتياطية. راجع Railway Logs وإعداد BACKUP_ENCRYPTION_KEY.",
+            reply_markup=admin_keyboard(),
+        )
 
 
 async def db_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -576,8 +688,7 @@ async def handle_restore_file(update: Update, context: ContextTypes.DEFAULT_TYPE
     file = await context.bot.get_file(doc.file_id)
     raw = await file.download_as_bytearray()
     try:
-        import json
-        data = json.loads(raw.decode("utf-8"))
+        data = decode_backup_bytes(bytes(raw), doc.file_name or "")
         tables = list(data.get("tables", {}).keys())[:20]
         await update.effective_message.reply_text(
             "✅ تم فحص ملف النسخة الاحتياطية.\n"
@@ -586,8 +697,8 @@ async def handle_restore_file(update: Update, context: ContextTypes.DEFAULT_TYPE
             "الاسترجاع التلقائي غير مفعل حتى لا تُمسح البيانات بالخطأ.",
             reply_markup=admin_keyboard(),
         )
-    except Exception as e:
-        await update.effective_message.reply_text(f"الملف غير صالح: {e}", reply_markup=admin_keyboard())
+    except Exception as exc:
+        await update.effective_message.reply_text(f"الملف غير صالح: {exc}", reply_markup=admin_keyboard())
     context.user_data.clear()
 
 

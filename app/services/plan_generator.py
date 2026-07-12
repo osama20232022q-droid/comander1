@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from app.utils import html_escape
+
 from app.config import settings
 from app.services.assets import logo_data_uri
+from app.utils import html_escape
 
 
 def _level_factor(level: str) -> float:
@@ -66,20 +67,28 @@ def generate_plan_html(profile, subject, request: dict, material_stats: dict, pa
     if question_type == "Short essay":
         focus += ["حوّل كل عنوان إلى جواب قصير من 3-5 نقاط.", "احفظ التعاريف والمقارنات بصياغة إنكليزية دقيقة."]
     elif question_type == "MCQ":
-        focus += ["استخرج الفروقات والأرقام والكلمات المفتاحية؛ هذه أكثر مصادر الفخاخ.", "بعد كل قراءة قصيرة حل أسئلة مباشرة ولا تؤجل الاختبار."]
+        focus += [
+            "استخرج الفروقات والأرقام والكلمات المفتاحية؛ هذه أكثر مصادر الفخاخ.",
+            "بعد كل قراءة قصيرة حل أسئلة مباشرة ولا تؤجل الاختبار.",
+        ]
     elif question_type == "عملي":
-        focus += ["اجعل الصور/السلايدات مراجعة يومية قصيرة ولا تكتفي بالنظري.", "اكتب لكل صورة: الاسم، العلامة المميزة، سؤال محتمل."]
+        focus += [
+            "اجعل الصور/السلايدات مراجعة يومية قصيرة ولا تكتفي بالنظري.",
+            "اكتب لكل صورة: الاسم، العلامة المميزة، سؤال محتمل.",
+        ]
     else:
         focus += ["قسّم الوقت: فهم سريع ثم MCQ ثم Short essay ثم مراجعة أخطاء."]
     if past_stats.get("count", 0):
         focus.append("أسئلة السنوات تعتبر دليل تركيز الأساتذة: راجعها قبل وبعد قراءة الملزمة.")
     if other_materials and str(other_materials).strip() not in ["لا", "لا يوجد", "none"]:
-        focus.append("لأن عندك مواد أخرى، لا تضع كل الطاقة في هذه المادة؛ اعتمد جلسات قصيرة صافية لا جلسات طويلة وهمية.")
+        focus.append(
+            "لأن عندك مواد أخرى، لا تضع كل الطاقة في هذه المادة؛ اعتمد جلسات قصيرة صافية لا جلسات طويلة وهمية."
+        )
 
     start_date = datetime.now().date()
     rows = []
     for i in range(1, days_left + 1):
-        day = start_date + timedelta(days=i-1)
+        day = start_date + timedelta(days=i - 1)
         if i == 1:
             mission = "مسح سريع + تقسيم العناوين + تحديد الفخاخ"
         elif i <= max(1, int(days_left * 0.45)):
@@ -90,10 +99,12 @@ def generate_plan_html(profile, subject, request: dict, material_stats: dict, pa
             mission = "High-yield + مراجعة أخطاء + اختبار ذاتي"
         rows.append((i, str(day), mission, daily_hours))
 
-    table = "".join([f"<tr><td>{d}</td><td>{date}</td><td>{html_escape(m)}</td><td>{hrs} h</td></tr>" for d, date, m, hrs in rows])
+    table = "".join(
+        [f"<tr><td>{d}</td><td>{date}</td><td>{html_escape(m)}</td><td>{hrs} h</td></tr>" for d, date, m, hrs in rows]
+    )
     bullets = "".join([f"<li>{html_escape(x)}</li>" for x in focus])
 
-    file_note = f"ملحقات المادة: {material_stats.get('count',0)} — أسئلة السنوات: {past_stats.get('count',0)} — صفحات/وحدات مدخلة: {pages}"
+    file_note = f"ملحقات المادة: {material_stats.get('count', 0)} — أسئلة السنوات: {past_stats.get('count', 0)} — صفحات/وحدات مدخلة: {pages}"
 
     return f"""<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>Study Plan</title>
 <style>

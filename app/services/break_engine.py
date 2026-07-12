@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from app.utils import local_now
 from app.services.prayer import prayer_hint
+from app.utils import local_now
 
 
 def build_break_recommendation(cycle_number: int, break_minutes: int, focus_score: int | None = None) -> str:

@@ -5,13 +5,14 @@ import os
 import re
 import urllib.parse
 import urllib.request
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+
 from sqlalchemy import select
 
 from app.config import settings
 from app.db import get_session
-from app.models import PrayerTimeCache, PrayerManualTime
+from app.models import PrayerManualTime, PrayerTimeCache
 
 BAGHDAD_TZ = ZoneInfo(settings.timezone or "Asia/Baghdad")
 
@@ -55,30 +56,46 @@ PRAYER_LABELS = {
 # Short Quranic excerpts and study-focused reminders. Keep them short and rotate by date/prayer.
 # The motivation button also uses this same bank so all motivation stays Quran-centered.
 QURAN_STUDY_MESSAGES = [
-    {"key":"q001","ayah":"﴿وَاسْتَعِينُوا بِالصَّبْرِ وَالصَّلَاةِ﴾","note":"الصلاة تقطع الفوضى وتعيد تركيزك؛ ارجع بعدها لجولة صغيرة صادقة."},
-    {"key":"q002","ayah":"﴿إِنَّ مَعَ الْعُسْرِ يُسْرًا﴾","note":"لا تجعل صعوبة المادة توقفك؛ خذ صفحة واحدة ثم أكمل."},
-    {"key":"q003","ayah":"﴿وَقُل رَّبِّ زِدْنِي عِلْمًا﴾","note":"النية الصافية تجعل الدراسة أهدأ وأقوى."},
-    {"key":"q004","ayah":"﴿لَا يُكَلِّفُ اللَّهُ نَفْسًا إِلَّا وُسْعَهَا﴾","note":"نفّذ ما تقدر عليه الآن، ولا تترك اليوم يضيع بالكامل."},
-    {"key":"q005","ayah":"﴿فَإِذَا عَزَمْتَ فَتَوَكَّلْ عَلَى اللَّهِ﴾","note":"بعد الصلاة لا تفاوض نفسك؛ ابدأ أول مهمة مباشرة."},
-    {"key":"q006","ayah":"﴿وَاصْبِرْ وَمَا صَبْرُكَ إِلَّا بِاللَّهِ﴾","note":"الصبر الدراسي يعني ترجع للجلسة حتى لو مزاجك ضعيف."},
-    {"key":"q007","ayah":"﴿إِنَّ اللَّهَ مَعَ الصَّابِرِينَ﴾","note":"الجولات الصغيرة المتكررة تبني نجاحك أكثر من الحماس المؤقت."},
-    {"key":"q008","ayah":"﴿وَمَا تَوْفِيقِي إِلَّا بِاللَّهِ﴾","note":"خذ بالأسباب: صلاة، ماء، جلسة، سؤال، مراجعة."},
-    {"key":"q009","ayah":"﴿فَاذْكُرُونِي أَذْكُرْكُمْ﴾","note":"اذكر الله ثم ارجع بنية أوضح وذهن أهدأ."},
-    {"key":"q010","ayah":"﴿إِنَّ اللَّهَ يُحِبُّ الْمُتَوَكِّلِينَ﴾","note":"التوكل ليس ترك الدراسة؛ التوكل تنفيذ الخطة بلا هلع."},
-    {"key":"q011","ayah":"﴿وَاللَّهُ مَعَكُمْ﴾","note":"لا تبدأ الجلسة وكأنك وحدك؛ رتّب قلبك ثم رتّب وقتك."},
-    {"key":"q012","ayah":"﴿سَيَجْعَلُ اللَّهُ بَعْدَ عُسْرٍ يُسْرًا﴾","note":"المادة التي تخيفك اليوم تصير أسهل بالتكرار."},
-    {"key":"q013","ayah":"﴿رَبِّ اشْرَحْ لِي صَدْرِي﴾","note":"إذا ضاق صدرك، لا تترك؛ صغّر المهمة وابدأ."},
-    {"key":"q014","ayah":"﴿وَتَوَكَّلْ عَلَى الْحَيِّ الَّذِي لَا يَمُوتُ﴾","note":"لا تربط قوتك بالمزاج؛ اربطها بالواجب."},
-    {"key":"q015","ayah":"﴿وَاصْبِرْ لِحُكْمِ رَبِّكَ﴾","note":"التأخير لا يُصلح بالذعر؛ يُصلح بجلسة الآن."},
-    {"key":"q016","ayah":"﴿إِنَّ رَبِّي قَرِيبٌ مُّجِيبٌ﴾","note":"ادعُ، ثم افتح الملزمة، فالعمل باب الإجابة."},
-    {"key":"q017","ayah":"﴿وَمَن يَتَّقِ اللَّهَ يَجْعَل لَّهُ مَخْرَجًا﴾","note":"اجعل الصلاة بوابة ترتيب لا بوابة تسويف."},
-    {"key":"q018","ayah":"﴿وَمَن يَتَوَكَّلْ عَلَى اللَّهِ فَهُوَ حَسْبُهُ﴾","note":"ابدأ بما عليك، واترك ثقل النتيجة."},
-    {"key":"q019","ayah":"﴿إِنَّ اللَّهَ لَا يُضِيعُ أَجْرَ الْمُحْسِنِينَ﴾","note":"كل جلسة صادقة محفوظة، حتى لو كانت قصيرة."},
-    {"key":"q020","ayah":"﴿فَاصْبِرْ صَبْرًا جَمِيلًا﴾","note":"الصبر الجميل اليوم: جلسة بلا هاتف بعد الصلاة."},
-    {"key":"q021","ayah":"﴿رَبِّ زِدْنِي عِلْمًا﴾","note":"كررها قبل الجلسة، ثم اسأل نفسك: ما السؤال الذي سأجيب عنه؟"},
-    {"key":"q022","ayah":"﴿إِنَّ مَعِيَ رَبِّي سَيَهْدِينِ﴾","note":"إذا شعرت بالضياع، ارجع للخطوة التالية فقط."},
-    {"key":"q023","ayah":"﴿وَهُوَ عَلَى كُلِّ شَيْءٍ قَدِيرٌ﴾","note":"لا تحكم على نفسك من يوم ضعيف؛ أصلح الساعة القادمة."},
-    {"key":"q024","ayah":"﴿قُلْ عَسَىٰ أَن يَهْدِيَنِ رَبِّي لِأَقْرَبَ مِنْ هَٰذَا رَشَدًا﴾","note":"اطلب الرشد في اختيار ماذا تدرس الآن، لا كل شيء دفعة واحدة."},
+    {
+        "key": "q001",
+        "ayah": "﴿وَاسْتَعِينُوا بِالصَّبْرِ وَالصَّلَاةِ﴾",
+        "note": "الصلاة تقطع الفوضى وتعيد تركيزك؛ ارجع بعدها لجولة صغيرة صادقة.",
+    },
+    {"key": "q002", "ayah": "﴿إِنَّ مَعَ الْعُسْرِ يُسْرًا﴾", "note": "لا تجعل صعوبة المادة توقفك؛ خذ صفحة واحدة ثم أكمل."},
+    {"key": "q003", "ayah": "﴿وَقُل رَّبِّ زِدْنِي عِلْمًا﴾", "note": "النية الصافية تجعل الدراسة أهدأ وأقوى."},
+    {
+        "key": "q004",
+        "ayah": "﴿لَا يُكَلِّفُ اللَّهُ نَفْسًا إِلَّا وُسْعَهَا﴾",
+        "note": "نفّذ ما تقدر عليه الآن، ولا تترك اليوم يضيع بالكامل.",
+    },
+    {"key": "q005", "ayah": "﴿فَإِذَا عَزَمْتَ فَتَوَكَّلْ عَلَى اللَّهِ﴾", "note": "بعد الصلاة لا تفاوض نفسك؛ ابدأ أول مهمة مباشرة."},
+    {"key": "q006", "ayah": "﴿وَاصْبِرْ وَمَا صَبْرُكَ إِلَّا بِاللَّهِ﴾", "note": "الصبر الدراسي يعني ترجع للجلسة حتى لو مزاجك ضعيف."},
+    {
+        "key": "q007",
+        "ayah": "﴿إِنَّ اللَّهَ مَعَ الصَّابِرِينَ﴾",
+        "note": "الجولات الصغيرة المتكررة تبني نجاحك أكثر من الحماس المؤقت.",
+    },
+    {"key": "q008", "ayah": "﴿وَمَا تَوْفِيقِي إِلَّا بِاللَّهِ﴾", "note": "خذ بالأسباب: صلاة، ماء، جلسة، سؤال، مراجعة."},
+    {"key": "q009", "ayah": "﴿فَاذْكُرُونِي أَذْكُرْكُمْ﴾", "note": "اذكر الله ثم ارجع بنية أوضح وذهن أهدأ."},
+    {"key": "q010", "ayah": "﴿إِنَّ اللَّهَ يُحِبُّ الْمُتَوَكِّلِينَ﴾", "note": "التوكل ليس ترك الدراسة؛ التوكل تنفيذ الخطة بلا هلع."},
+    {"key": "q011", "ayah": "﴿وَاللَّهُ مَعَكُمْ﴾", "note": "لا تبدأ الجلسة وكأنك وحدك؛ رتّب قلبك ثم رتّب وقتك."},
+    {"key": "q012", "ayah": "﴿سَيَجْعَلُ اللَّهُ بَعْدَ عُسْرٍ يُسْرًا﴾", "note": "المادة التي تخيفك اليوم تصير أسهل بالتكرار."},
+    {"key": "q013", "ayah": "﴿رَبِّ اشْرَحْ لِي صَدْرِي﴾", "note": "إذا ضاق صدرك، لا تترك؛ صغّر المهمة وابدأ."},
+    {"key": "q014", "ayah": "﴿وَتَوَكَّلْ عَلَى الْحَيِّ الَّذِي لَا يَمُوتُ﴾", "note": "لا تربط قوتك بالمزاج؛ اربطها بالواجب."},
+    {"key": "q015", "ayah": "﴿وَاصْبِرْ لِحُكْمِ رَبِّكَ﴾", "note": "التأخير لا يُصلح بالذعر؛ يُصلح بجلسة الآن."},
+    {"key": "q016", "ayah": "﴿إِنَّ رَبِّي قَرِيبٌ مُّجِيبٌ﴾", "note": "ادعُ، ثم افتح الملزمة، فالعمل باب الإجابة."},
+    {"key": "q017", "ayah": "﴿وَمَن يَتَّقِ اللَّهَ يَجْعَل لَّهُ مَخْرَجًا﴾", "note": "اجعل الصلاة بوابة ترتيب لا بوابة تسويف."},
+    {"key": "q018", "ayah": "﴿وَمَن يَتَوَكَّلْ عَلَى اللَّهِ فَهُوَ حَسْبُهُ﴾", "note": "ابدأ بما عليك، واترك ثقل النتيجة."},
+    {"key": "q019", "ayah": "﴿إِنَّ اللَّهَ لَا يُضِيعُ أَجْرَ الْمُحْسِنِينَ﴾", "note": "كل جلسة صادقة محفوظة، حتى لو كانت قصيرة."},
+    {"key": "q020", "ayah": "﴿فَاصْبِرْ صَبْرًا جَمِيلًا﴾", "note": "الصبر الجميل اليوم: جلسة بلا هاتف بعد الصلاة."},
+    {"key": "q021", "ayah": "﴿رَبِّ زِدْنِي عِلْمًا﴾", "note": "كررها قبل الجلسة، ثم اسأل نفسك: ما السؤال الذي سأجيب عنه؟"},
+    {"key": "q022", "ayah": "﴿إِنَّ مَعِيَ رَبِّي سَيَهْدِينِ﴾", "note": "إذا شعرت بالضياع، ارجع للخطوة التالية فقط."},
+    {"key": "q023", "ayah": "﴿وَهُوَ عَلَى كُلِّ شَيْءٍ قَدِيرٌ﴾", "note": "لا تحكم على نفسك من يوم ضعيف؛ أصلح الساعة القادمة."},
+    {
+        "key": "q024",
+        "ayah": "﴿قُلْ عَسَىٰ أَن يَهْدِيَنِ رَبِّي لِأَقْرَبَ مِنْ هَٰذَا رَشَدًا﴾",
+        "note": "اطلب الرشد في اختيار ماذا تدرس الآن، لا كل شيء دفعة واحدة.",
+    },
 ]
 
 
@@ -86,7 +103,7 @@ def governorate_buttons() -> list[list[str]]:
     names = list(IRAQ_GOVERNORATES.keys())
     rows: list[list[str]] = []
     for i in range(0, len(names), 2):
-        rows.append(names[i:i+2])
+        rows.append(names[i : i + 2])
     rows.append(["❌ إلغاء تفعيل أذكار الصلاة", "🏠 القائمة الرئيسية"])
     return rows
 
@@ -97,7 +114,8 @@ def normalize_time(value: str | None) -> str | None:
     m = re.search(r"(\d{1,2})[:٫.](\d{2})", str(value))
     if not m:
         return None
-    h = int(m.group(1)); minute = int(m.group(2))
+    h = int(m.group(1))
+    minute = int(m.group(2))
     if not (0 <= h <= 23 and 0 <= minute <= 59):
         return None
     return f"{h:02d}:{minute:02d}"
@@ -134,15 +152,20 @@ def _extract_times(payload: object) -> dict[str, str] | None:
 
 def fetch_hq_times(governorate: str) -> tuple[dict[str, str], str, str | None]:
     lat, lon = IRAQ_GOVERNORATES.get(governorate, IRAQ_GOVERNORATES["بغداد"])
-    params = urllib.parse.urlencode({
-        "v": "jsonPrayerTimes",
-        "timezone": settings.timezone or "Asia/Baghdad",
-        "long": str(lon),
-        "lati": str(lat),
-    })
+    params = urllib.parse.urlencode(
+        {
+            "v": "jsonPrayerTimes",
+            "timezone": settings.timezone or "Asia/Baghdad",
+            "long": str(lon),
+            "lati": str(lat),
+        }
+    )
     url = f"https://hq.alkafeel.net/Api/init/init.php?{params}"
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "https" or parsed.hostname != "hq.alkafeel.net":
+        return dict(FALLBACK_TIMES), "fallback", None
     try:
-        with urllib.request.urlopen(url, timeout=PRAYER_REMOTE_TIMEOUT) as r:
+        with urllib.request.urlopen(url, timeout=PRAYER_REMOTE_TIMEOUT) as r:  # nosec B310
             raw = r.read().decode("utf-8", errors="replace")
         payload = json.loads(raw)
         times = _extract_times(payload)
@@ -166,7 +189,11 @@ def get_prayer_times(governorate: str, now: datetime | None = None) -> dict[str,
     if cache_key in _PRAYER_MEM_CACHE:
         return dict(_PRAYER_MEM_CACHE[cache_key])
     with get_session() as db:
-        row = db.scalar(select(PrayerTimeCache).where(PrayerTimeCache.governorate == governorate, PrayerTimeCache.date_key == date_key))
+        row = db.scalar(
+            select(PrayerTimeCache).where(
+                PrayerTimeCache.governorate == governorate, PrayerTimeCache.date_key == date_key
+            )
+        )
         if row:
             times = {"fajr": row.fajr, "dhuhr": row.dhuhr, "maghrib": row.maghrib}
             _PRAYER_MEM_CACHE[cache_key] = times
@@ -229,9 +256,15 @@ def parse_hhmm(date: datetime, hhmm: str) -> datetime:
     return date.replace(hour=h, minute=m, second=0, microsecond=0)
 
 
-def prayer_events_for_day(governorate: str, now: datetime | None = None, user_id: int | None = None) -> list[tuple[str, datetime]]:
+def prayer_events_for_day(
+    governorate: str, now: datetime | None = None, user_id: int | None = None
+) -> list[tuple[str, datetime]]:
     now = now or datetime.now(BAGHDAD_TZ)
-    times = get_prayer_times_for_user(user_id, governorate, now) if user_id is not None else get_prayer_times(governorate, now)
+    times = (
+        get_prayer_times_for_user(user_id, governorate, now)
+        if user_id is not None
+        else get_prayer_times(governorate, now)
+    )
     return [
         ("fajr", parse_hhmm(now, times["fajr"])),
         ("dhuhr_asr", parse_hhmm(now, times["dhuhr"])),
@@ -239,14 +272,20 @@ def prayer_events_for_day(governorate: str, now: datetime | None = None, user_id
     ]
 
 
-def upcoming_prayer(governorate: str, now: datetime | None = None, user_id: int | None = None) -> tuple[str, datetime] | None:
+def upcoming_prayer(
+    governorate: str, now: datetime | None = None, user_id: int | None = None
+) -> tuple[str, datetime] | None:
     now = now or datetime.now(BAGHDAD_TZ)
     for key, dt in prayer_events_for_day(governorate, now, user_id=user_id):
         if dt >= now:
             return key, dt
     # tomorrow fajr
     tomorrow = now + timedelta(days=1)
-    times = get_prayer_times_for_user(user_id, governorate, tomorrow) if user_id is not None else get_prayer_times(governorate, tomorrow)
+    times = (
+        get_prayer_times_for_user(user_id, governorate, tomorrow)
+        if user_id is not None
+        else get_prayer_times(governorate, tomorrow)
+    )
     return "fajr", parse_hhmm(tomorrow, times["fajr"])
 
 
@@ -259,7 +298,9 @@ def seconds_until_next_prayer(governorate: str, now: datetime | None = None) -> 
     return key, int((dt - now).total_seconds())
 
 
-def seconds_until_next_prayer_for_user(user_id: int, governorate: str, now: datetime | None = None) -> tuple[str, int] | None:
+def seconds_until_next_prayer_for_user(
+    user_id: int, governorate: str, now: datetime | None = None
+) -> tuple[str, int] | None:
     now = now or datetime.now(BAGHDAD_TZ)
     nxt = upcoming_prayer(governorate, now, user_id=user_id)
     if not nxt:
@@ -296,6 +337,7 @@ def motivation_quote(recent_keys: list[str] | None = None) -> dict:
     if len(pool) < 5:
         pool = QURAN_STUDY_MESSAGES[:]
     import random
+
     q = random.choice(pool)
     return {"key": q["key"], "text": f"{q['ayah']}\n\n{q['note']}"}
 

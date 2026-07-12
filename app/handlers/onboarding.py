@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from telegram import Update
 from telegram.ext import ContextTypes
+
 from app.db import get_session
-from app.keyboards import confirm_back_keyboard, nav_keyboard, main_keyboard
+from app.keyboards import confirm_back_keyboard, main_keyboard, nav_keyboard
 from app.repositories.users_repo import ensure_user, save_profile
-from app.utils import validate_triple_name, normalize_text, parse_health, classify_college
+from app.utils import classify_college, normalize_text, parse_health, validate_triple_name
 
 
 def _msg(update: Update):
@@ -57,7 +58,9 @@ async def handle_onboarding_text(update: Update, context: ContextTypes.DEFAULT_T
         draft["study_domain"] = domain
         draft["specialty"] = specialty
         context.user_data["step"] = "stage"
-        await msg.reply_text(f"تم تحليل الكلية: {specialty}\n\nأنت بأي مرحلة؟ مثال: مرحلة أولى / ثانية / ثالثة / رابعة...")
+        await msg.reply_text(
+            f"تم تحليل الكلية: {specialty}\n\nأنت بأي مرحلة؟ مثال: مرحلة أولى / ثانية / ثالثة / رابعة..."
+        )
         return
 
     if step == "stage":
@@ -97,7 +100,7 @@ async def _go_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     step = context.user_data.get("step")
     order = ["name", "college", "stage", "health", "review"]
     if step in order and order.index(step) > 0:
-        context.user_data["step"] = order[order.index(step)-1]
+        context.user_data["step"] = order[order.index(step) - 1]
     prompts = {
         "name": "اكتب اسمك الثلاثي.",
         "college": "اكتب اسم الكلية.",
@@ -105,7 +108,9 @@ async def _go_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "health": "اكتب العمر الطول الوزن أو تخطي.",
         "review": "راجع معلوماتك ثم أكد.",
     }
-    await update.effective_message.reply_text(prompts.get(context.user_data.get("step"), "اكتب البيانات."), reply_markup=nav_keyboard())
+    await update.effective_message.reply_text(
+        prompts.get(context.user_data.get("step"), "اكتب البيانات."), reply_markup=nav_keyboard()
+    )
 
 
 async def show_review(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -137,7 +142,9 @@ async def confirm_onboarding_text(update: Update, context: ContextTypes.DEFAULT_
         else:
             active_text = "تم حفظ ملفك. حسابك بانتظار تفعيل الأدمن."
     context.user_data.clear()
-    await update.effective_message.reply_text(f"✅ {active_text}\n\n{profile.specialty}", reply_markup=main_keyboard(user.role == "admin"))
+    await update.effective_message.reply_text(
+        f"✅ {active_text}\n\n{profile.specialty}", reply_markup=main_keyboard(user.role == "admin")
+    )
 
 
 # kept for compatibility if old inline callbacks arrive

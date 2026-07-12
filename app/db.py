@@ -1,16 +1,27 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
+
 from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import Session, sessionmaker
+
 from app.config import settings
 from app.models import Base
+
+log = logging.getLogger(__name__)
 
 
 def _make_database_url() -> str:
     if settings.database_url:
-        return settings.database_url
+        # Railway may expose postgres://; SQLAlchemy 2 expects the driver name.
+        url = settings.database_url
+        if url.startswith("postgres://"):
+            url = "postgresql+psycopg://" + url[len("postgres://") :]
+        elif url.startswith("postgresql://") and "+psycopg" not in url:
+            url = "postgresql+psycopg://" + url[len("postgresql://") :]
+        return url
     db_path = Path(settings.database_path)
     if not db_path.is_absolute():
         db_path = Path.cwd() / db_path
@@ -32,6 +43,7 @@ if DATABASE_URL.startswith("sqlite"):
     def _sqlite_pragmas(dbapi_connection, connection_record):  # noqa: ANN001
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA foreign_keys=ON")
         cursor.execute("PRAGMA synchronous=NORMAL")
         cursor.execute("PRAGMA temp_store=MEMORY")
         cursor.execute("PRAGMA busy_timeout=30000")
@@ -51,7 +63,22 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False
 
 
 def init_db() -> None:
-    Base.metadata.create_all(bind=engine)
+    """Apply Alembic migrations; only fall back to create_all in development."""
+    try:
+        from alembic import command
+        from alembic.config import Config
+
+        project_root = Path(__file__).resolve().parents[1]
+        cfg = Config(str(project_root / "alembic.ini"))
+        cfg.set_main_option("script_location", str(project_root / "alembic"))
+        command.upgrade(cfg, "head")
+    except Exception:
+        log.exception("Database migration failed")
+        if settings.environment in {"development", "test"}:
+            log.warning("Development fallback: Base.metadata.create_all")
+            Base.metadata.create_all(bind=engine)
+        else:
+            raise
 
 
 def get_session() -> Session:

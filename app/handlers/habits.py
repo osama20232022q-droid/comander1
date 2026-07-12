@@ -1,24 +1,27 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from sqlalchemy import select
 from telegram import Update
 from telegram.ext import ContextTypes
 
 from app.db import get_session
-from app.keyboards import (
-    manual_settings_keyboard, habit_duration_keyboard, habit_review_keyboard,
-    routine_type_keyboard, routine_review_keyboard, main_keyboard, nav_keyboard
-)
-from app.models import User, HabitPlan, RoutinePlan
 from app.handlers.admin import is_admin_tg
+from app.keyboards import (
+    habit_duration_keyboard,
+    habit_review_keyboard,
+    main_keyboard,
+    manual_settings_keyboard,
+    nav_keyboard,
+    routine_review_keyboard,
+    routine_type_keyboard,
+)
+from app.models import HabitPlan, RoutinePlan, User
 
 
 async def show_manual_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop("flow", None)
     await update.effective_message.reply_text(
-        "⚙️ الضبط اليدوي\n\n"
-        "من هنا تگدر تعدّل ملفك، تغيّر نظامك، أو تبني عادة جديدة بطريقة تدريجية علمية.",
+        "⚙️ الضبط اليدوي\n\nمن هنا تگدر تعدّل ملفك، تغيّر نظامك، أو تبني عادة جديدة بطريقة تدريجية علمية.",
         reply_markup=manual_settings_keyboard(),
     )
 
@@ -28,8 +31,7 @@ async def start_routine_change(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data["step"] = "routine_type"
     context.user_data["routine_draft"] = {}
     await update.effective_message.reply_text(
-        "🔄 تغيير نظامي\n\n"
-        "اختر نوع النظام الذي تريد تجربته. لا نحكم على النظام من يوم واحد؛ الأفضل تجربة 7-14 يوم.",
+        "🔄 تغيير نظامي\n\nاختر نوع النظام الذي تريد تجربته. لا نحكم على النظام من يوم واحد؛ الأفضل تجربة 7-14 يوم.",
         reply_markup=routine_type_keyboard(),
     )
 
@@ -50,13 +52,19 @@ async def list_habits(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         user = db.scalar(select(User).where(User.telegram_id == update.effective_user.id))
         if not user:
             return
-        habits = db.scalars(select(HabitPlan).where(HabitPlan.user_id == user.id).order_by(HabitPlan.created_at.desc()).limit(20)).all()
-        routines = db.scalars(select(RoutinePlan).where(RoutinePlan.user_id == user.id).order_by(RoutinePlan.created_at.desc()).limit(5)).all()
+        habits = db.scalars(
+            select(HabitPlan).where(HabitPlan.user_id == user.id).order_by(HabitPlan.created_at.desc()).limit(20)
+        ).all()
+        routines = db.scalars(
+            select(RoutinePlan).where(RoutinePlan.user_id == user.id).order_by(RoutinePlan.created_at.desc()).limit(5)
+        ).all()
     lines = ["📋 عاداتي وأنظمتي"]
     if routines:
         lines.append("\n🔄 الأنظمة:")
         for r in routines:
-            lines.append(f"• {r.name} — {r.status} — {r.duration_days} يوم — استيقاظ: {r.wake_time or '-'} / نوم: {r.sleep_time or '-'}")
+            lines.append(
+                f"• {r.name} — {r.status} — {r.duration_days} يوم — استيقاظ: {r.wake_time or '-'} / نوم: {r.sleep_time or '-'}"
+            )
     if habits:
         lines.append("\n🌱 العادات:")
         for h in habits:
@@ -72,7 +80,9 @@ async def handle_habit_text(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         return False
     if text == "🏠 القائمة الرئيسية":
         context.user_data.clear()
-        await update.effective_message.reply_text("🏠 القائمة الرئيسية", reply_markup=main_keyboard(is_admin_tg(update.effective_user.id)))
+        await update.effective_message.reply_text(
+            "🏠 القائمة الرئيسية", reply_markup=main_keyboard(is_admin_tg(update.effective_user.id))
+        )
         return True
     if text == "⚙️ الضبط اليدوي" or text == "↩️ خطوة للوراء":
         await show_manual_settings(update, context)
@@ -96,8 +106,7 @@ async def _handle_habit_add(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         draft["title"] = text.strip()
         context.user_data["step"] = "habit_reason"
         await msg.reply_text(
-            "ليش تريد هذه العادة؟ اكتب سبب واحد قوي.\n"
-            "مثال: حتى أبدأ يومي قبل الفوضى / حتى أثبت مراجعة يومية.",
+            "ليش تريد هذه العادة؟ اكتب سبب واحد قوي.\nمثال: حتى أبدأ يومي قبل الفوضى / حتى أثبت مراجعة يومية.",
             reply_markup=nav_keyboard(),
         )
         return True
@@ -189,21 +198,22 @@ async def _save_habit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         user = db.scalar(select(User).where(User.telegram_id == update.effective_user.id))
         if not user:
             return
-        db.add(HabitPlan(
-            user_id=user.id,
-            title=d.get("title", "عادة جديدة"),
-            reason=d.get("reason"),
-            anchor=d.get("anchor"),
-            tiny_action=d.get("tiny_action", "خطوة صغيرة"),
-            reward=d.get("reward"),
-            duration_days=int(d.get("duration_days") or 14),
-            status="active",
-        ))
+        db.add(
+            HabitPlan(
+                user_id=user.id,
+                title=d.get("title", "عادة جديدة"),
+                reason=d.get("reason"),
+                anchor=d.get("anchor"),
+                tiny_action=d.get("tiny_action", "خطوة صغيرة"),
+                reward=d.get("reward"),
+                duration_days=int(d.get("duration_days") or 14),
+                status="active",
+            )
+        )
         db.commit()
     context.user_data.clear()
     await update.effective_message.reply_text(
-        "✅ تم حفظ العادة.\n\n"
-        "ابدأ بأقل خطوة اليوم، ولا تقيس النجاح بالمزاج. قِسه بالتنفيذ.",
+        "✅ تم حفظ العادة.\n\nابدأ بأقل خطوة اليوم، ولا تقيس النجاح بالمزاج. قِسه بالتنفيذ.",
         reply_markup=main_keyboard(is_admin_tg(update.effective_user.id)),
     )
 
@@ -233,8 +243,7 @@ async def _handle_routine_change(update: Update, context: ContextTypes.DEFAULT_T
         draft["sleep_time"] = text.strip()[:20]
         context.user_data["step"] = "routine_rule"
         await msg.reply_text(
-            "اكتب أهم قانون لهذا النظام.\n"
-            "مثال: الهاتف خارج الغرفة بعد 10 مساءً / لا سرير بعد أول جلسة.",
+            "اكتب أهم قانون لهذا النظام.\nمثال: الهاتف خارج الغرفة بعد 10 مساءً / لا سرير بعد أول جلسة.",
             reply_markup=nav_keyboard(),
         )
         return True
@@ -282,19 +291,20 @@ async def _save_routine(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         user = db.scalar(select(User).where(User.telegram_id == update.effective_user.id))
         if not user:
             return
-        db.add(RoutinePlan(
-            user_id=user.id,
-            name=d.get("name", "نظام جديد"),
-            wake_time=d.get("wake_time"),
-            sleep_time=d.get("sleep_time"),
-            rule=d.get("rule"),
-            duration_days=14,
-            status="trial",
-        ))
+        db.add(
+            RoutinePlan(
+                user_id=user.id,
+                name=d.get("name", "نظام جديد"),
+                wake_time=d.get("wake_time"),
+                sleep_time=d.get("sleep_time"),
+                rule=d.get("rule"),
+                duration_days=14,
+                status="trial",
+            )
+        )
         db.commit()
     context.user_data.clear()
     await update.effective_message.reply_text(
-        "✅ تم حفظ تجربة النظام.\n\n"
-        "نفذها 14 يومًا قبل الحكم عليها. أول 3 أيام تكيف، وليست مقياسًا للفشل.",
+        "✅ تم حفظ تجربة النظام.\n\nنفذها 14 يومًا قبل الحكم عليها. أول 3 أيام تكيف، وليست مقياسًا للفشل.",
         reply_markup=main_keyboard(is_admin_tg(update.effective_user.id)),
     )

@@ -10,6 +10,7 @@ def rk(rows: list[list[str]], placeholder: str = "اختر أمرًا") -> Reply
 def _dynamic_rows(scope: str, include_admin_entry: bool = False) -> list[list[str]]:
     try:
         from app.services.buttons import keyboard_rows_for_scope
+
         rows = keyboard_rows_for_scope(scope, include_admin_entry=include_admin_entry)
         if rows:
             return rows
@@ -28,7 +29,7 @@ def main_keyboard(is_admin: bool = False) -> ReplyKeyboardMarkup:
             ["📊 تقدمي", "🏅 شهاداتي"],
             ["👤 ملفي"],
             ["🔘 الأزرار الشفافة", "❓ ماذا يفعل هذا البوت؟"],
-            ["⚙️ ضبط يدوي"],
+            ["⚙️ ضبط يدوي", "🪖 غرفة العمليات"],
         ]
         if is_admin:
             rows.append(["👑 لوحة الأدمن"])
@@ -52,48 +53,60 @@ def subjects_menu_keyboard(subjects: list[str]) -> ReplyKeyboardMarkup:
 
 
 def subject_detail_keyboard(subject_name: str) -> ReplyKeyboardMarkup:
-    return rk([
-        [f"📎 رفع ملحقات {subject_name}"],
-        [f"📘 رفع أسئلة سنوات {subject_name}"],
-        [f"📂 عرض ملحقات {subject_name}", f"📚 عرض أسئلة سنوات {subject_name}"],
-        [f"🧠 تحليل سريع {subject_name}"],
-        ["↩️ خطوة للوراء", "🏠 القائمة الرئيسية"],
-    ], "إجراءات المادة")
+    return rk(
+        [
+            [f"📎 رفع ملحقات {subject_name}"],
+            [f"📘 رفع أسئلة سنوات {subject_name}"],
+            [f"📂 عرض ملحقات {subject_name}", f"📚 عرض أسئلة سنوات {subject_name}"],
+            [f"🧠 تحليل سريع {subject_name}"],
+            ["↩️ خطوة للوراء", "🏠 القائمة الرئيسية"],
+        ],
+        "إجراءات المادة",
+    )
 
 
 def plan_options_keyboard(values: list[str]) -> ReplyKeyboardMarkup:
     rows = []
     for i in range(0, len(values), 2):
-        rows.append(values[i:i+2])
+        rows.append(values[i : i + 2])
     rows.append(["↩️ خطوة للوراء", "🏠 القائمة الرئيسية"])
     return rk(rows)
 
 
 def pomodoro_menu_keyboard() -> ReplyKeyboardMarkup:
-    return rk([
-        ["25 دراسة / 5 راحة", "50 دراسة / 10 راحة"],
-        ["90 دراسة / 15 راحة", "وقت مخصص"],
-        ["▶️ ابدأ", "⌛ كم المتبقي؟"],
-        ["✅ أنهيت الجلسة", "🍽️ سجل الأكل"],
-        ["↩️ خطوة للوراء", "🏠 القائمة الرئيسية"],
-    ], "اختر نظام البومودورو")
+    return rk(
+        [
+            ["25 دراسة / 5 راحة", "50 دراسة / 10 راحة"],
+            ["90 دراسة / 15 راحة", "وقت مخصص"],
+            ["▶️ ابدأ", "⌛ كم المتبقي؟"],
+            ["✅ أنهيت الجلسة", "🍽️ سجل الأكل"],
+            ["↩️ خطوة للوراء", "🏠 القائمة الرئيسية"],
+        ],
+        "اختر نظام البومودورو",
+    )
 
 
 def pomodoro_running_keyboard() -> ReplyKeyboardMarkup:
-    return rk([
-        ["⌛ كم المتبقي؟", "✅ أنهيت الجلسة"],
-        ["🍽️ سجل الأكل"],
-        ["🏠 القائمة الرئيسية"],
-    ], "الجلسة تعمل")
+    return rk(
+        [
+            ["⌛ كم المتبقي؟", "✅ أنهيت الجلسة"],
+            ["🍽️ سجل الأكل"],
+            ["🏠 القائمة الرئيسية"],
+        ],
+        "الجلسة تعمل",
+    )
 
 
 def certificate_keyboard() -> ReplyKeyboardMarkup:
-    return rk([
-        ["📋 شروط الشهادة"],
-        ["🏅 طلب شهادة يوم مميز", "🎖️ طلب شهادة أسبوعية"],
-        ["📜 آخر شهاداتي"],
-        ["↩️ خطوة للوراء", "🏠 القائمة الرئيسية"],
-    ], "الشهادات")
+    return rk(
+        [
+            ["📋 شروط الشهادة"],
+            ["🏅 طلب شهادة يوم مميز", "🎖️ طلب شهادة أسبوعية"],
+            ["📜 آخر شهاداتي"],
+            ["↩️ خطوة للوراء", "🏠 القائمة الرئيسية"],
+        ],
+        "الشهادات",
+    )
 
 
 def admin_keyboard() -> ReplyKeyboardMarkup:
@@ -145,19 +158,25 @@ def button_confirm_delete_keyboard() -> ReplyKeyboardMarkup:
 
 
 def button_style_keyboard() -> ReplyKeyboardMarkup:
-    return rk([
-        ["⚪ عادي", "🔵 أزرق"],
-        ["🟢 أخضر", "🔴 أحمر"],
-        ["↩️ رجوع إلى الأزرار", "👑 لوحة الأدمن"],
-    ], "اختر نمط الزر")
+    return rk(
+        [
+            ["⚪ عادي", "🔵 أزرق"],
+            ["🟢 أخضر", "🔴 أحمر"],
+            ["↩️ رجوع إلى الأزرار", "👑 لوحة الأدمن"],
+        ],
+        "اختر نمط الزر",
+    )
 
 
 def button_order_scope_keyboard() -> ReplyKeyboardMarkup:
-    return rk([
-        ["القائمة الرئيسية - main", "لوحة الأدمن - admin"],
-        ["إدارة الأزرار - buttons", "تعديل الأزرار - edit"],
-        ["↩️ رجوع إلى الأزرار", "👑 لوحة الأدمن"],
-    ], "اختر الشاشة التي تريد ترتيب أزرارها")
+    return rk(
+        [
+            ["القائمة الرئيسية - main", "لوحة الأدمن - admin"],
+            ["إدارة الأزرار - buttons", "تعديل الأزرار - edit"],
+            ["↩️ رجوع إلى الأزرار", "👑 لوحة الأدمن"],
+        ],
+        "اختر الشاشة التي تريد ترتيب أزرارها",
+    )
 
 
 def profile_keyboard() -> ReplyKeyboardMarkup:
@@ -170,6 +189,7 @@ def profile_keyboard() -> ReplyKeyboardMarkup:
             ["🏠 القائمة الرئيسية"],
         ]
     return rk(rows, "ملفك الشخصي")
+
 
 def manual_settings_keyboard() -> ReplyKeyboardMarkup:
     rows = _dynamic_rows("profile")
@@ -184,30 +204,85 @@ def manual_settings_keyboard() -> ReplyKeyboardMarkup:
 
 
 def habit_duration_keyboard() -> ReplyKeyboardMarkup:
-    return rk([
-        ["7 أيام", "14 يوم"],
-        ["21 يوم", "30 يوم"],
-        ["⚙️ الضبط اليدوي", "🏠 القائمة الرئيسية"],
-    ], "اختر مدة العادة")
+    return rk(
+        [
+            ["7 أيام", "14 يوم"],
+            ["21 يوم", "30 يوم"],
+            ["⚙️ الضبط اليدوي", "🏠 القائمة الرئيسية"],
+        ],
+        "اختر مدة العادة",
+    )
 
 
 def habit_review_keyboard() -> ReplyKeyboardMarkup:
-    return rk([
-        ["✅ حفظ العادة", "🔴 رجوع للتعديل"],
-        ["⚙️ الضبط اليدوي", "🏠 القائمة الرئيسية"],
-    ], "تأكيد العادة")
+    return rk(
+        [
+            ["✅ حفظ العادة", "🔴 رجوع للتعديل"],
+            ["⚙️ الضبط اليدوي", "🏠 القائمة الرئيسية"],
+        ],
+        "تأكيد العادة",
+    )
 
 
 def routine_type_keyboard() -> ReplyKeyboardMarkup:
-    return rk([
-        ["نظام صباحي", "نظام نوم مبكر"],
-        ["نظام دراسة ثابت", "نظام مخصص"],
-        ["⚙️ الضبط اليدوي", "🏠 القائمة الرئيسية"],
-    ], "اختر نوع النظام")
+    return rk(
+        [
+            ["نظام صباحي", "نظام نوم مبكر"],
+            ["نظام دراسة ثابت", "نظام مخصص"],
+            ["⚙️ الضبط اليدوي", "🏠 القائمة الرئيسية"],
+        ],
+        "اختر نوع النظام",
+    )
 
 
 def routine_review_keyboard() -> ReplyKeyboardMarkup:
-    return rk([
-        ["✅ حفظ النظام", "🔴 رجوع للتعديل"],
-        ["⚙️ الضبط اليدوي", "🏠 القائمة الرئيسية"],
-    ], "تأكيد النظام")
+    return rk(
+        [
+            ["✅ حفظ النظام", "🔴 رجوع للتعديل"],
+            ["⚙️ الضبط اليدوي", "🏠 القائمة الرئيسية"],
+        ],
+        "تأكيد النظام",
+    )
+
+
+def discipline_menu_keyboard() -> ReplyKeyboardMarkup:
+    return rk(
+        [
+            ["📋 سجل تقرير اليوم", "🌐 تقرير HTML اليوم"],
+            ["📆 تقرير 7 أيام", "🎯 أوامر اليوم"],
+            ["🚨 جلسة إنقاذ 20 دقيقة"],
+            ["🏠 القائمة الرئيسية"],
+        ],
+        "غرفة العمليات والانضباط",
+    )
+
+
+def discipline_phone_keyboard() -> ReplyKeyboardMarkup:
+    return rk(
+        [
+            ["📵 الهاتف خارج المكان"],
+            ["📱 استخدمت الهاتف أثناء الدراسة"],
+            ["🏠 القائمة الرئيسية"],
+        ],
+        "اختر حالة الهاتف",
+    )
+
+
+def discipline_yes_no_keyboard() -> ReplyKeyboardMarkup:
+    return rk(
+        [
+            ["✅ نعم", "❌ لا"],
+            ["🏠 القائمة الرئيسية"],
+        ],
+        "اختر نعم أو لا",
+    )
+
+
+def discipline_review_keyboard() -> ReplyKeyboardMarkup:
+    return rk(
+        [
+            ["✅ اعتماد التقرير", "🔴 إعادة الإدخال"],
+            ["🏠 القائمة الرئيسية"],
+        ],
+        "راجع ثم اعتمد التقرير",
+    )

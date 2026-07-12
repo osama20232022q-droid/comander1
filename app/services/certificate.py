@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from datetime import datetime
+
 from app.config import settings
 from app.services.assets import logo_data_uri
 from app.utils import html_escape
 
 
-def certificate_html(student_name: str, cert_type: str, hours: float, sessions: int, subjects_count: int, score: int, reason: str) -> str:
+def certificate_html(
+    student_name: str, cert_type: str, hours: float, sessions: int, subjects_count: int, score: int, reason: str
+) -> str:
     date = datetime.now().strftime("%Y-%m-%d")
     signature_letters = "S C B · A D S"
     title = "شهادة إنجاز يوم مميز" if cert_type == "daily" else "شهادة إنجاز أسبوعي"

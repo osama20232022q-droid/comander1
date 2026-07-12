@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
+
 from app.config import settings
 
 AR_EN_NAME_RE = re.compile(r"^[\u0600-\u06FFa-zA-Z][\u0600-\u06FFa-zA-Z'\-\.]*$")
@@ -65,4 +66,4 @@ def parse_health(text: str) -> tuple[int | None, float | None, float | None]:
 def html_escape(s: str | None) -> str:
     if not s:
         return ""
-    return (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;"))
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")

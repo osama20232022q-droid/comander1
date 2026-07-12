@@ -1,29 +1,76 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
-from telegram import Update, BotCommand
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
+from datetime import UTC, datetime
+
+from telegram import BotCommand, Update
+from telegram.ext import (
+    AIORateLimiter,
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    TypeHandler,
+    filters,
+)
+
 from app.config import settings
-from app.db import init_db, get_session
+from app.db import get_session, init_db
+from app.handlers.admin import (
+    handle_admin_callback,
+    handle_admin_text,
+    handle_restore_file,
+    is_admin_tg,
+    show_admin_panel,
+)
+from app.handlers.ai_chat import handle_ai_chat_file, handle_ai_chat_text, show_ai_chat
+from app.handlers.certificates import handle_cert_callback, handle_certificate_text, show_certificates
+from app.handlers.discipline import (
+    handle_discipline_text,
+    send_today_html,
+    show_operations_room,
+)
+from app.handlers.habits import (
+    handle_habit_text,
+    list_habits,
+    show_manual_settings,
+    start_habit_add,
+    start_routine_change,
+)
+from app.handlers.motivation import motivate
+from app.handlers.onboarding import confirm_onboarding, handle_onboarding_text, start_onboarding
+from app.handlers.plans import handle_plan_callback, handle_plan_text, start_plan_flow
+from app.handlers.pomodoro import (
+    handle_custom_pomo,
+    handle_food_log,
+    handle_pomodoro_text,
+    show_pomodoro,
+    show_remaining,
+)
+from app.handlers.prayer_reminders import handle_prayer_text, prayer_notifier_job, show_prayer_menu
+from app.handlers.progress import handle_profile_edit_text, show_profile, show_progress, start_profile_edit
+from app.handlers.subjects import (
+    analyze_current_subject,
+    begin_add_subject,
+    begin_upload_current,
+    handle_add_subject,
+    handle_attachment_message,
+    list_current_attachments,
+    open_subject_by_name,
+    show_subjects_menu,
+)
+from app.keyboards import main_keyboard
 from app.models import User
 from app.repositories.users_repo import ensure_user
-from app.keyboards import main_keyboard
-from app.services.buttons import action_by_label, inline_custom_keyboard, custom_button_response_by_id, ensure_default_buttons
-from app.handlers.onboarding import start_onboarding, handle_onboarding_text, confirm_onboarding
-from app.handlers.subjects import (
-    show_subjects_menu, begin_add_subject, handle_add_subject, open_subject_by_name,
-    begin_upload_current, handle_attachment_message, list_current_attachments, analyze_current_subject,
+from app.services.buttons import (
+    action_by_label,
+    custom_button_response_by_id,
+    ensure_default_buttons,
+    inline_custom_keyboard,
 )
-from app.handlers.plans import start_plan_flow, handle_plan_text, handle_plan_callback
-from app.handlers.pomodoro import show_pomodoro, handle_pomodoro_text, handle_custom_pomo, handle_food_log, show_remaining
-from app.handlers.motivation import motivate
-from app.handlers.prayer_reminders import handle_prayer_text, show_prayer_menu, prayer_notifier_job
-from app.handlers.progress import show_progress, show_profile, start_profile_edit, handle_profile_edit_text
-from app.handlers.certificates import show_certificates, handle_certificate_text, handle_cert_callback
-from app.handlers.admin import show_admin_panel, handle_admin_callback, is_admin_tg, handle_restore_file, handle_admin_text
-from app.handlers.habits import show_manual_settings, start_routine_change, start_habit_add, handle_habit_text, list_habits
-from app.handlers.ai_chat import show_ai_chat, handle_ai_chat_text, handle_ai_chat_file
+from app.services.inbound_rate_limit import inbound_guard
+from app.version import version_label
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
 log = logging.getLogger("study_commander")
@@ -34,7 +81,7 @@ def _is_access_valid(user: User) -> bool:
         return True
     if not user.is_active or user.is_banned:
         return False
-    if user.access_until and user.access_until < datetime.now(timezone.utc):
+    if user.access_until and user.access_until < datetime.now(UTC):
         return False
     return True
 
@@ -65,9 +112,11 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "❓ ماذا يفعل هذا البوت؟\n\n"
         "• ينظم موادك وملفاتك وأسئلة السنوات.\n"
         "• يصنع خطة دراسية حسب مستواك ونوع امتحانك والأيام المتبقية.\n"
-        "• يشغل بومودورو مع وقت متبقٍ وتقدم بالثواني.\n"
-        "• يتابع ساعاتك وتقدمك وشهاداتك.\n"
-        "• يعطي رسائل تحفيزية متوازنة بدون تكرار سريع.\n"
+        "• يشغل بومودورو وجلسة إنقاذ عند التسويف.\n"
+        "• غرفة عمليات تسجل النوم، الهاتف، النظري، العملي، MCQ والمقالي.\n"
+        "• يولد تقرير HTML يومي وأسبوعي مع Discipline Score من 100.\n"
+        "• يعطي أوامر تصحيح ثابتة بدل تعديل الجدول كل يوم.\n"
+        "• Gemini مساعد للشرح وMCQ والمقالي، ولا يتحكم بالدرجات أو السجلات.\n"
         "• لوحة الأدمن والتفعيل والنسخ الاحتياطي تظهر للأدمن فقط.",
         reply_markup=main_keyboard(is_admin_tg(update.effective_user.id)),
     )
@@ -91,8 +140,7 @@ async def _require_ready(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return False
         if not _is_access_valid(user):
             await update.effective_message.reply_text(
-                "حسابك بانتظار تفعيل الأدمن أو انتهت صلاحيته.\n"
-                f"معرفك الرقمي: {update.effective_user.id}"
+                f"حسابك بانتظار تفعيل الأدمن أو انتهت صلاحيته.\nمعرفك الرقمي: {update.effective_user.id}"
             )
             return False
     return True
@@ -108,7 +156,7 @@ def _current_subject_action(text: str) -> tuple[str, str] | None:
     ]
     for p, action in prefixes:
         if text.startswith(p):
-            return action, text[len(p):].strip()
+            return action, text[len(p) :].strip()
     return None
 
 
@@ -130,14 +178,25 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not await _require_ready(update, context):
         return
 
+    if await handle_discipline_text(update, context, text):
+        return
+
     # Admin flows and admin menu are processed first but only for admin.
     admin_related = False
     if is_admin_tg(update.effective_user.id):
         if flow and (flow.startswith("admin_") or flow.startswith("button_") or flow == "restore_backup"):
             admin_related = True
         else:
-            admin_btn = action_by_label(text, scopes=("admin", "admin_buttons", "admin_button_edit", "admin_entry", "both"))
-            admin_related = bool(admin_btn and (admin_btn.scope in ["admin", "admin_buttons", "admin_button_edit", "admin_entry"] or admin_btn.action_key == "admin_panel"))
+            admin_btn = action_by_label(
+                text, scopes=("admin", "admin_buttons", "admin_button_edit", "admin_entry", "both")
+            )
+            admin_related = bool(
+                admin_btn
+                and (
+                    admin_btn.scope in ["admin", "admin_buttons", "admin_button_edit", "admin_entry"]
+                    or admin_btn.action_key == "admin_panel"
+                )
+            )
     if admin_related:
         if await handle_admin_text(update, context, text):
             return
@@ -183,7 +242,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await show_subjects_menu(update, context)
     elif text.startswith("📘 "):
         await open_subject_by_name(update, context, text)
-    elif (act := _current_subject_action(text)):
+    elif act := _current_subject_action(text):
         action, _ = act
         if action == "upload_material":
             await begin_upload_current(update, context, "material")
@@ -201,6 +260,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await show_pomodoro(update, context)
     elif main_action == "ai_chat" or text == "🤖 دردشة AI":
         await show_ai_chat(update, context)
+    elif main_action == "discipline" or text == "🪖 غرفة العمليات":
+        await show_operations_room(update, context)
     elif await handle_pomodoro_text(update, context, text):
         return
     elif main_action == "motivate" or text == "🔥 حفزني":
@@ -234,17 +295,26 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     elif main_action == "inline_buttons" or text == "🔘 الأزرار الشفافة":
         kb = inline_custom_keyboard()
         if not kb:
-            await update.effective_message.reply_text("لا توجد أزرار شفافة مضافة حاليًا.", reply_markup=main_keyboard(is_admin_tg(update.effective_user.id)))
+            await update.effective_message.reply_text(
+                "لا توجد أزرار شفافة مضافة حاليًا.", reply_markup=main_keyboard(is_admin_tg(update.effective_user.id))
+            )
         else:
             await update.effective_message.reply_text("🔘 الأزرار الشفافة المضافة:", reply_markup=kb)
     elif main_action == "admin_panel" and is_admin_tg(update.effective_user.id):
         await show_admin_panel(update, context)
     elif main_action and main_action.startswith("custom:"):
-        await update.effective_message.reply_text(main_btn.response_text or "هذا زر مخصص بلا نص.", reply_markup=main_keyboard(is_admin_tg(update.effective_user.id)))
+        await update.effective_message.reply_text(
+            main_btn.response_text or "هذا زر مخصص بلا نص.",
+            reply_markup=main_keyboard(is_admin_tg(update.effective_user.id)),
+        )
     elif text == "↩️ خطوة للوراء":
-        await update.effective_message.reply_text("تم الرجوع للقائمة الرئيسية.", reply_markup=main_keyboard(is_admin_tg(update.effective_user.id)))
+        await update.effective_message.reply_text(
+            "تم الرجوع للقائمة الرئيسية.", reply_markup=main_keyboard(is_admin_tg(update.effective_user.id))
+        )
     else:
-        await update.effective_message.reply_text("لم أفهم الأمر. استخدم لوحة الأزرار.", reply_markup=main_keyboard(is_admin_tg(update.effective_user.id)))
+        await update.effective_message.reply_text(
+            "لم أفهم الأمر. استخدم لوحة الأزرار.", reply_markup=main_keyboard(is_admin_tg(update.effective_user.id))
+        )
 
 
 async def handle_files(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -310,13 +380,14 @@ async def configure_bot_profile(app: Application) -> None:
         BotCommand("profile", "عرض ملفي"),
         BotCommand("habits", "عاداتي وتغيير النظام"),
         BotCommand("ai", "دردشة AI للشرح والأسئلة"),
+        BotCommand("report", "تقرير الانضباط اليومي"),
         BotCommand("admin", "لوحة الأدمن"),
     ]
     await app.bot.set_my_commands(commands)
     try:
-        await app.bot.set_my_short_description("بوت قيادة دراسة: مواد، خطط، بومودورو، تقدم وشهادات.")
+        await app.bot.set_my_short_description("قيادة دراسة وانضباط: خطط، مؤقت، تقارير HTML وGemini.")
         await app.bot.set_my_description(
-            "Study Commander Bot ينظم مواد الطالب وملفاته، يصنع خطط دراسة واقعية، يحسب جلسات البومودورو، يتابع التقدم، ويمنح شهادات إنجاز عند تحقق الشروط."
+            "Study Commander Bot يقود الدراسة والانضباط: مواد وخطط وبومودورو، غرفة عمليات، تقارير HTML يومية وأسبوعية، وGemini للمساعدة الدراسية."
         )
     except Exception:
         log.warning("Could not set bot description/short description", exc_info=True)
@@ -330,13 +401,15 @@ async def main() -> None:
     app = (
         Application.builder()
         .token(settings.bot_token)
-        .concurrent_updates(True)
-        .connection_pool_size(32)
-        .pool_timeout(30)
-        .read_timeout(30)
-        .write_timeout(30)
+        .concurrent_updates(settings.bot_concurrent_updates)
+        .connection_pool_size(settings.tg_connection_pool_size)
+        .pool_timeout(settings.tg_pool_timeout)
+        .read_timeout(settings.tg_read_timeout)
+        .write_timeout(settings.tg_write_timeout)
+        .rate_limiter(AIORateLimiter())
         .build()
     )
+    app.add_handler(TypeHandler(Update, inbound_guard), group=-100)
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("menu", go_home))
     app.add_handler(CommandHandler("help", cmd_help))
@@ -345,20 +418,31 @@ async def main() -> None:
     app.add_handler(CommandHandler("profile", show_profile))
     app.add_handler(CommandHandler("habits", show_manual_settings))
     app.add_handler(CommandHandler("ai", show_ai_chat))
+    app.add_handler(CommandHandler("report", send_today_html))
     app.add_handler(CommandHandler("admin", show_admin_panel))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    app.add_handler(MessageHandler((filters.Document.ALL | filters.PHOTO | filters.AUDIO | filters.VIDEO) & ~filters.COMMAND, handle_files))
+    app.add_handler(
+        MessageHandler(
+            (filters.Document.ALL | filters.PHOTO | filters.AUDIO | filters.VIDEO) & ~filters.COMMAND, handle_files
+        )
+    )
     app.add_error_handler(error_handler)
     if app.job_queue:
-        app.job_queue.run_repeating(prayer_notifier_job, interval=60, first=20, name="prayer_notifier")
-    log.info("Study Commander Bot v6 prayer reminders patch started")
+        app.job_queue.run_repeating(
+            prayer_notifier_job,
+            interval=settings.prayer_job_interval,
+            first=20,
+            name="prayer_notifier",
+        )
+    log.info("%s started", version_label())
     await app.initialize()
     await configure_bot_profile(app)
     await app.start()
     await app.updater.start_polling(drop_pending_updates=True)
     try:
         import asyncio
+
         await asyncio.Event().wait()
     finally:
         await app.updater.stop()

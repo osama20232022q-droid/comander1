@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from telegram import Update
 from telegram.ext import ContextTypes
+
 from app.db import get_session
-from app.models import User, Subject, Attachment
-from app.keyboards import subjects_menu_keyboard, subject_detail_keyboard, nav_keyboard
+from app.keyboards import nav_keyboard, subject_detail_keyboard, subjects_menu_keyboard
+from app.models import Attachment, Subject, User
 from app.utils import normalize_text
 
 
@@ -30,7 +31,9 @@ async def show_subjects_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def begin_add_subject(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data["flow"] = "add_subject"
-    await update.effective_message.reply_text("اكتب اسم المادة كما تريد أن يظهر كزر مستقل. مثال: Anatomy", reply_markup=nav_keyboard())
+    await update.effective_message.reply_text(
+        "اكتب اسم المادة كما تريد أن يظهر كزر مستقل. مثال: Anatomy", reply_markup=nav_keyboard()
+    )
 
 
 async def handle_add_subject(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
@@ -40,7 +43,9 @@ async def handle_add_subject(update: Update, context: ContextTypes.DEFAULT_TYPE,
         return
     with get_session() as db:
         user = _get_current_user(db, update.effective_user.id)
-        existing = db.scalar(select(Subject).where(Subject.user_id == user.id, func.lower(Subject.name) == name.lower()))
+        existing = db.scalar(
+            select(Subject).where(Subject.user_id == user.id, func.lower(Subject.name) == name.lower())
+        )
         if existing:
             await update.effective_message.reply_text("هذه المادة موجودة مسبقًا.")
             context.user_data.clear()
@@ -63,8 +68,22 @@ async def open_subject_by_name(update: Update, context: ContextTypes.DEFAULT_TYP
         if not subject:
             await update.effective_message.reply_text("المادة غير موجودة. افتح 📚 المواد وشوف القائمة.")
             return
-        material_count = db.scalar(select(func.count()).select_from(Attachment).where(Attachment.subject_id == subject.id, Attachment.kind == "material")) or 0
-        past_count = db.scalar(select(func.count()).select_from(Attachment).where(Attachment.subject_id == subject.id, Attachment.kind == "past_question")) or 0
+        material_count = (
+            db.scalar(
+                select(func.count())
+                .select_from(Attachment)
+                .where(Attachment.subject_id == subject.id, Attachment.kind == "material")
+            )
+            or 0
+        )
+        past_count = (
+            db.scalar(
+                select(func.count())
+                .select_from(Attachment)
+                .where(Attachment.subject_id == subject.id, Attachment.kind == "past_question")
+            )
+            or 0
+        )
         sid = subject.id
         sname = subject.name
     context.user_data["current_subject_id"] = sid
@@ -163,7 +182,12 @@ async def list_current_attachments(update: Update, context: ContextTypes.DEFAULT
         return
     with get_session() as db:
         subject = db.get(Subject, subject_id)
-        attachments = db.scalars(select(Attachment).where(Attachment.subject_id == subject_id, Attachment.kind == kind).order_by(Attachment.uploaded_at.desc()).limit(20)).all()
+        attachments = db.scalars(
+            select(Attachment)
+            .where(Attachment.subject_id == subject_id, Attachment.kind == kind)
+            .order_by(Attachment.uploaded_at.desc())
+            .limit(20)
+        ).all()
     if not attachments:
         await update.effective_message.reply_text("لا توجد ملفات بعد.")
         return
@@ -179,7 +203,9 @@ async def list_current_attachments(update: Update, context: ContextTypes.DEFAULT
         elif att.file_type == "video":
             await update.effective_message.reply_video(att.telegram_file_id, caption=caption)
         else:
-            await update.effective_message.reply_text(f"{caption}\n{att.text_content[:1000] if att.text_content else ''}")
+            await update.effective_message.reply_text(
+                f"{caption}\n{att.text_content[:1000] if att.text_content else ''}"
+            )
 
 
 async def analyze_current_subject(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -189,10 +215,29 @@ async def analyze_current_subject(update: Update, context: ContextTypes.DEFAULT_
         return
     with get_session() as db:
         subject = db.get(Subject, subject_id)
-        material_count = db.scalar(select(func.count()).select_from(Attachment).where(Attachment.subject_id == subject_id, Attachment.kind == "material")) or 0
-        past_count = db.scalar(select(func.count()).select_from(Attachment).where(Attachment.subject_id == subject_id, Attachment.kind == "past_question")) or 0
-        total_size = db.scalar(select(func.coalesce(func.sum(Attachment.file_size), 0)).where(Attachment.subject_id == subject_id)) or 0
-    mb = total_size / (1024*1024)
+        material_count = (
+            db.scalar(
+                select(func.count())
+                .select_from(Attachment)
+                .where(Attachment.subject_id == subject_id, Attachment.kind == "material")
+            )
+            or 0
+        )
+        past_count = (
+            db.scalar(
+                select(func.count())
+                .select_from(Attachment)
+                .where(Attachment.subject_id == subject_id, Attachment.kind == "past_question")
+            )
+            or 0
+        )
+        total_size = (
+            db.scalar(
+                select(func.coalesce(func.sum(Attachment.file_size), 0)).where(Attachment.subject_id == subject_id)
+            )
+            or 0
+        )
+    mb = total_size / (1024 * 1024)
     difficulty = "خفيفة/غير مكتملة"
     if material_count >= 6 or mb > 15:
         difficulty = "عالية"
@@ -204,4 +249,3 @@ async def analyze_current_subject(update: Update, context: ContextTypes.DEFAULT_
         f"الصعوبة التقديرية: {difficulty}\n\n"
         "التحليل المعمق يحتاج من زر الخطة: عدد الصفحات، نوع الامتحان، مستواك، الأيام، والهدف."
     )
-

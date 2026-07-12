@@ -1,15 +1,17 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
-from sqlalchemy import select, func
+from datetime import UTC, datetime
+
+from sqlalchemy import func, select
 from telegram import Update
 from telegram.ext import ContextTypes
+
 from app.db import get_session
-from app.models import User, PomodoroSession, FoodLog, PrayerSetting
-from app.keyboards import pomodoro_menu_keyboard, pomodoro_running_keyboard, nav_keyboard
+from app.keyboards import nav_keyboard, pomodoro_menu_keyboard, pomodoro_running_keyboard
+from app.models import FoodLog, PomodoroSession, PrayerSetting, User
 from app.services.break_engine import build_break_recommendation
 from app.services.calories import estimate_calories
-from app.services.prayer import seconds_until_next_prayer_for_user, PRAYER_LABELS
+from app.services.prayer import PRAYER_LABELS, seconds_until_next_prayer_for_user
 
 
 def _current_user(db, tg_id: int) -> User | None:
@@ -17,7 +19,11 @@ def _current_user(db, tg_id: int) -> User | None:
 
 
 def _active_session(db, user_id: int) -> PomodoroSession | None:
-    return db.scalar(select(PomodoroSession).where(PomodoroSession.user_id == user_id, PomodoroSession.status == "running").order_by(PomodoroSession.started_at.desc()))
+    return db.scalar(
+        select(PomodoroSession)
+        .where(PomodoroSession.user_id == user_id, PomodoroSession.status == "running")
+        .order_by(PomodoroSession.started_at.desc())
+    )
 
 
 def _bar(done_ratio: float, width: int = 12) -> str:
@@ -26,7 +32,7 @@ def _bar(done_ratio: float, width: int = 12) -> str:
 
 
 def _ensure_aware(dt: datetime) -> datetime:
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 async def show_pomodoro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -43,15 +49,21 @@ async def handle_pomodoro_text(update: Update, context: ContextTypes.DEFAULT_TYP
         return True
     if text == "50 دراسة / 10 راحة":
         context.user_data["pomo_choice"] = (50, 10)
-        await update.effective_message.reply_text("تم اختيار 50/10. اضغط ▶️ ابدأ.", reply_markup=pomodoro_menu_keyboard())
+        await update.effective_message.reply_text(
+            "تم اختيار 50/10. اضغط ▶️ ابدأ.", reply_markup=pomodoro_menu_keyboard()
+        )
         return True
     if text == "90 دراسة / 15 راحة":
         context.user_data["pomo_choice"] = (90, 15)
-        await update.effective_message.reply_text("تم اختيار 90/15. اضغط ▶️ ابدأ.", reply_markup=pomodoro_menu_keyboard())
+        await update.effective_message.reply_text(
+            "تم اختيار 90/15. اضغط ▶️ ابدأ.", reply_markup=pomodoro_menu_keyboard()
+        )
         return True
     if text == "وقت مخصص":
         context.user_data["flow"] = "pomo_custom"
-        await update.effective_message.reply_text("اكتب وقت الدراسة ووقت الراحة بالدقائق. مثال: 70 12", reply_markup=nav_keyboard())
+        await update.effective_message.reply_text(
+            "اكتب وقت الدراسة ووقت الراحة بالدقائق. مثال: 70 12", reply_markup=nav_keyboard()
+        )
         return True
     if text == "▶️ ابدأ":
         study, brk = context.user_data.get("pomo_choice", (25, 5))
@@ -65,7 +77,9 @@ async def handle_pomodoro_text(update: Update, context: ContextTypes.DEFAULT_TYP
         return True
     if text == "🍽️ سجل الأكل":
         context.user_data["flow"] = "food_log"
-        await update.effective_message.reply_text("شنو أكلت أو شربت؟ اكتبها بجملة واحدة. إذا ما أكلت اكتب: لا", reply_markup=nav_keyboard())
+        await update.effective_message.reply_text(
+            "شنو أكلت أو شربت؟ اكتبها بجملة واحدة. إذا ما أكلت اكتب: لا", reply_markup=nav_keyboard()
+        )
         return True
     return False
 
@@ -81,22 +95,31 @@ async def handle_custom_pomo(update: Update, context: ContextTypes.DEFAULT_TYPE,
         return
     context.user_data.pop("flow", None)
     context.user_data["pomo_choice"] = (study, brk)
-    await update.effective_message.reply_text(f"تم اختيار {study}/{brk}. اضغط ▶️ ابدأ.", reply_markup=pomodoro_menu_keyboard())
+    await update.effective_message.reply_text(
+        f"تم اختيار {study}/{brk}. اضغط ▶️ ابدأ.", reply_markup=pomodoro_menu_keyboard()
+    )
 
 
-async def start_pomodoro(message, context: ContextTypes.DEFAULT_TYPE, tg_id: int, study_minutes: int, break_minutes: int) -> None:
+async def start_pomodoro(
+    message, context: ContextTypes.DEFAULT_TYPE, tg_id: int, study_minutes: int, break_minutes: int
+) -> None:
     with get_session() as db:
         user = _current_user(db, tg_id)
         active = _active_session(db, user.id)
         if active:
-            await message.reply_text("عندك جلسة تعمل حاليًا. استخدم ⌛ كم المتبقي؟ أو ✅ أنهيت الجلسة.", reply_markup=pomodoro_running_keyboard())
+            await message.reply_text(
+                "عندك جلسة تعمل حاليًا. استخدم ⌛ كم المتبقي؟ أو ✅ أنهيت الجلسة.",
+                reply_markup=pomodoro_running_keyboard(),
+            )
             return
         session = PomodoroSession(user_id=user.id, study_minutes=study_minutes, break_minutes=break_minutes)
         db.add(session)
         db.commit()
         db.refresh(session)
         sid = session.id
-        prayer_setting = db.scalar(select(PrayerSetting).where(PrayerSetting.user_id == user.id, PrayerSetting.enabled == True))  # noqa: E712
+        prayer_setting = db.scalar(
+            select(PrayerSetting).where(PrayerSetting.user_id == user.id, PrayerSetting.enabled.is_(True))
+        )  # noqa: E712
         prayer_note = ""
         effective_seconds = study_minutes * 60
         if prayer_setting and prayer_setting.governorate:
@@ -105,7 +128,9 @@ async def start_pomodoro(message, context: ContextTypes.DEFAULT_TYPE, tg_id: int
                 prayer_key, seconds_left = nxt
                 if 60 < seconds_left < effective_seconds:
                     effective_seconds = max(60, seconds_left - 60)
-                    prayer_note = f"\n🕌 تم ضبط الجلسة لتتوقف قبل دقيقة من {PRAYER_LABELS.get(prayer_key, 'الصلاة')} حسب محافظتك."
+                    prayer_note = (
+                        f"\n🕌 تم ضبط الجلسة لتتوقف قبل دقيقة من {PRAYER_LABELS.get(prayer_key, 'الصلاة')} حسب محافظتك."
+                    )
                 elif 0 <= seconds_left <= 60:
                     effective_seconds = 60
                     prayer_note = "\n🕌 وقت الصلاة قريب جدًا، سأجعل هذه الجلسة دقيقة ترتيب فقط ثم تتوقف."
@@ -117,7 +142,12 @@ async def start_pomodoro(message, context: ContextTypes.DEFAULT_TYPE, tg_id: int
         reply_markup=pomodoro_running_keyboard(),
     )
     if context.job_queue:
-        context.job_queue.run_once(pomodoro_time_up, when=effective_seconds, data={"chat_id": message.chat_id, "user_id": tg_id, "session_id": sid}, name=f"pomo_{sid}")
+        context.job_queue.run_once(
+            pomodoro_time_up,
+            when=effective_seconds,
+            data={"chat_id": message.chat_id, "user_id": tg_id, "session_id": sid},
+            name=f"pomo_{sid}",
+        )
 
 
 async def show_remaining(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -125,11 +155,13 @@ async def show_remaining(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         user = _current_user(db, update.effective_user.id)
         session = _active_session(db, user.id) if user else None
     if not session:
-        await update.effective_message.reply_text("لا توجد جلسة بومودورو تعمل الآن.", reply_markup=pomodoro_menu_keyboard())
+        await update.effective_message.reply_text(
+            "لا توجد جلسة بومودورو تعمل الآن.", reply_markup=pomodoro_menu_keyboard()
+        )
         return
     start = _ensure_aware(session.started_at)
     total = session.study_minutes * 60
-    elapsed = max(0, int((datetime.now(timezone.utc) - start).total_seconds()))
+    elapsed = max(0, int((datetime.now(UTC) - start).total_seconds()))
     remaining = max(0, total - elapsed)
     ratio = min(1.0, elapsed / total if total else 1)
     mm, ss = divmod(remaining, 60)
@@ -137,7 +169,7 @@ async def show_remaining(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.effective_message.reply_text(
         f"⌛ المتبقي: {mm:02d}:{ss:02d}\n"
         f"⏱️ المنجز: {em:02d}:{es:02d}\n"
-        f"📈 التقدم: {_bar(ratio)} {int(ratio*100)}%\n"
+        f"📈 التقدم: {_bar(ratio)} {int(ratio * 100)}%\n"
         f"الدراسة: {session.study_minutes} دقيقة — الراحة: {session.break_minutes} دقيقة",
         reply_markup=pomodoro_running_keyboard(),
     )
@@ -159,7 +191,9 @@ async def pomodoro_time_up(context: ContextTypes.DEFAULT_TYPE) -> None:
     await finish_pomodoro_by_ids(context, data["chat_id"], data["user_id"], data["session_id"], auto=True)
 
 
-async def finish_pomodoro_by_ids(context: ContextTypes.DEFAULT_TYPE, chat_id: int, tg_id: int, sid: int, auto: bool = False) -> None:
+async def finish_pomodoro_by_ids(
+    context: ContextTypes.DEFAULT_TYPE, chat_id: int, tg_id: int, sid: int, auto: bool = False
+) -> None:
     with get_session() as db:
         user = _current_user(db, tg_id)
         session = db.get(PomodoroSession, sid)
@@ -168,8 +202,15 @@ async def finish_pomodoro_by_ids(context: ContextTypes.DEFAULT_TYPE, chat_id: in
             return
         if session.status != "finished":
             session.status = "finished"
-            session.ended_at = datetime.now(timezone.utc)
-            cycle = db.scalar(select(func.count()).select_from(PomodoroSession).where(PomodoroSession.user_id == user.id, PomodoroSession.status == "finished")) or 1
+            session.ended_at = datetime.now(UTC)
+            cycle = (
+                db.scalar(
+                    select(func.count())
+                    .select_from(PomodoroSession)
+                    .where(PomodoroSession.user_id == user.id, PomodoroSession.status == "finished")
+                )
+                or 1
+            )
             rec = build_break_recommendation(cycle, session.break_minutes)
             session.break_recommendation = rec
             user.pending_food_session_id = sid
@@ -196,9 +237,14 @@ async def handle_food_log(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         db.commit()
     context.user_data.pop("flow", None)
     if mn is None:
-        await update.effective_message.reply_text("تم تسجيل الأكل. لم أستطع حساب السعرات بدقة، لكنه محفوظ في التقرير.", reply_markup=pomodoro_menu_keyboard())
+        await update.effective_message.reply_text(
+            "تم تسجيل الأكل. لم أستطع حساب السعرات بدقة، لكنه محفوظ في التقرير.", reply_markup=pomodoro_menu_keyboard()
+        )
     else:
-        await update.effective_message.reply_text(f"تم التسجيل. السعرات التقريبية: {mn}-{mx} kcal.\nالمطابقات: {', '.join(matches[:6])}", reply_markup=pomodoro_menu_keyboard())
+        await update.effective_message.reply_text(
+            f"تم التسجيل. السعرات التقريبية: {mn}-{mx} kcal.\nالمطابقات: {', '.join(matches[:6])}",
+            reply_markup=pomodoro_menu_keyboard(),
+        )
 
 
 # compatibility with old callback path

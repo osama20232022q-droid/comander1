@@ -1,58 +1,87 @@
-# Study Commander Bot V5 — Admin Buttons & Stats
+# Study Commander Bot V8 — Professional Hardened
 
-نسخة محسنة من بوت Study Commander مع إصلاحات لوحة الأدمن وإدارة الأزرار.
+بوت تيليغرام عربي لتنظيم الدراسة والانضباط، مع المواد، الخطط، البومودورو، غرفة العمليات، تقارير HTML، Gemini، لوحة أدمن، النسخ الاحتياطية، ومواقيت الصلاة.
 
-## أهم إضافات V5
+## أهم تحسينات V8
 
-- إصلاح خيار **📊 إحصائيات النظام** داخل لوحة الأدمن.
-- عرض عدد المستخدمين، المشتركين، بانتظار التفعيل، المحظورين، المنتهية اشتراكاتهم، المواد، الملفات، الخطط، الجلسات، الشهادات، والأزرار.
-- إضافة **🧩 الأزرار** داخل لوحة الأدمن فقط.
-- إدارة الأزرار من داخل البوت:
-  - حذف/إخفاء زر معين مع شاشة تأكيد منفصلة.
-  - خانة **🗑️ الأزرار المحذوفة** لاسترجاع الأزرار المحذوفة.
-  - إضافة زر جديد في لوحة الكيبورد.
-  - إضافة زر شفاف Inline يظهر تحت زر **🔘 الأزرار الشفافة**.
-  - إعادة تسمية زر موجود.
-  - تعديل نمط الزر: عادي/أزرق/أخضر/أحمر.
-  - استرجاع الأزرار الافتراضية.
-- الأزرار الحساسة مثل لوحة الأدمن وإدارة الأزرار محمية من الحذف حتى لا تفقد الوصول للإدارة.
+- Alembic Migrations بدل الاعتماد على `create_all` وحده.
+- معالجة متسلسلة افتراضيًا حتى لا تختلط خطوات التسجيل والتقارير.
+- حماية من ضغط الأزرار والإرسال السريع.
+- حد لحجم ملفات AI قبل تنزيلها.
+- حذف الملفات المؤقتة بعد إرسال التقارير والخطط والشهادات.
+- عداد Gemini يومي محفوظ في قاعدة البيانات ولا يرجع للصفر عند إعادة تشغيل السيرفر.
+- نسخ احتياطية مشفرة اختياريًا بمفتاح Fernet.
+- إخفاء التفاصيل التقنية عن المستخدم وإبقاؤها في Railway Logs.
+- إعدادات Telegram الموجودة في `.env` أصبحت مرتبطة فعليًا بالكود.
+- GitHub Actions: اختبارات، Ruff، Bandit، pip-audit، CodeQL، Dependabot.
+- تنظيف ملفات الشروحات القديمة ونقلها إلى `docs/legacy/`.
 
-> ملاحظة: Telegram قد لا يلوّن أزرار Reply Keyboard فعليًا في كل التطبيقات، لذلك يخزن البوت النمط ويعرض رمز اللون عند الحاجة.
+## التشغيل السريع
 
-## Railway Variables
-
-```env
-BOT_TOKEN=توكن_البوت
-ADMIN_IDS=ايديك_الرقمي
-TIMEZONE=Asia/Baghdad
-BOT_SIGNATURE=Study Commander Bot
-```
-
-للـ PostgreSQL الخارجي:
+1. انسخ `.env.example` إلى `.env` محليًا فقط.
+2. أضف:
 
 ```env
-DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST:PORT/DBNAME?sslmode=require
+BOT_TOKEN=...
+ADMIN_IDS=رقم_معرفك
+ENVIRONMENT=production
 ```
 
-إذا لم تضع `DATABASE_URL` سيعمل SQLite:
+3. شغّل:
+
+```bash
+pip install -r requirements.txt
+python run.py
+```
+
+عند التشغيل، يطبق Alembic آخر تحديثات قاعدة البيانات تلقائيًا.
+
+## Railway
+
+- ارفع محتويات المجلد إلى جذر مستودع GitHub، وليس ملف ZIP.
+- أنشئ مشروع Railway من المستودع.
+- أضف PostgreSQL واربط `DATABASE_URL`.
+- أضف متغيرات Telegram وGemini.
+- Railway يستخدم `Dockerfile` و`railway.json` تلقائيًا.
+
+راجع: `docs/RAILWAY_DEPLOY.md`
+
+## Gemini
 
 ```env
-DATABASE_PATH=/data/study_commander.sqlite3
+GEMINI_API_KEY=...
+GEMINI_MODEL=gemini-3.5-flash
+AI_CHAT_ENABLED=true
 ```
 
-## الرفع إلى GitHub
+Gemini للمساعدة الدراسية فقط. لا يغيّر الدرجات أو التقارير أو صلاحيات المستخدمين.
 
-ارفع محتويات الملف إلى جذر المستودع بحيث تظهر:
+## نسخ احتياطية مشفرة
 
-```text
-app/
-assets/
-docs/
-run.py
-requirements.txt
-Dockerfile
-Procfile
-railway.json
-README.md
-.env.example
+ولّد المفتاح مرة واحدة:
+
+```bash
+python -m app.tools.generate_backup_key
 ```
+
+ضع الناتج في Railway Variables:
+
+```env
+BACKUP_ENCRYPTION_KEY=...
+REQUIRE_ENCRYPTED_BACKUPS=true
+```
+
+لا ترفع هذا المفتاح إلى GitHub. فقدانه يعني عدم القدرة على فتح النسخ المشفرة القديمة.
+
+## الفحوص المحلية
+
+```bash
+pip install -r requirements-dev.txt
+ruff check .
+python -m pytest -q
+bandit -q -r app -ll
+```
+
+## ملاحظة توسع
+
+هذه النسخة مناسبة جدًا للاستعمال الشخصي والمجموعات الصغيرة والمتوسطة. قاعدة البيانات ما زالت تستخدم SQLAlchemy المتزامن داخل handlers؛ عند تحويل المشروع إلى منصة عامة ضخمة جدًا، تكون الخطوة التالية فصل الأعمال الثقيلة وتحويل طبقة البيانات إلى Async SQLAlchemy أو خدمة مستقلة.

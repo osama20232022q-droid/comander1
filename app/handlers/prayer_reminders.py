@@ -2,32 +2,36 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+
 from sqlalchemy import select
 from telegram import ReplyKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from app.db import get_session
-from app.models import User, PrayerSetting, PrayerManualTime
-from app.keyboards import rk, main_keyboard
+from app.keyboards import main_keyboard, rk
+from app.models import PrayerManualTime, PrayerSetting, User
 from app.services.prayer import (
-    IRAQ_GOVERNORATES,
-    governorate_buttons,
     BAGHDAD_TZ,
-    prayer_events_for_day,
+    IRAQ_GOVERNORATES,
     build_prayer_text,
-    normalize_time,
-    save_manual_times,
     clear_manual_times,
+    governorate_buttons,
+    normalize_time,
+    prayer_events_for_day,
+    save_manual_times,
 )
 
 
 def prayer_menu_keyboard() -> ReplyKeyboardMarkup:
-    return rk([
-        ["✅ تفعيل أذكار الصلاة", "❌ إلغاء تفعيل أذكار الصلاة"],
-        ["📍 تغيير المحافظة", "🕘 تعديل أوقات الصلاة يدويًا"],
-        ["🔄 استخدام توقيت حقيبة المؤمن", "📋 حالة أذكار الصلاة"],
-        ["🏠 القائمة الرئيسية"],
-    ], "أذكار الصلاة")
+    return rk(
+        [
+            ["✅ تفعيل أذكار الصلاة", "❌ إلغاء تفعيل أذكار الصلاة"],
+            ["📍 تغيير المحافظة", "🕘 تعديل أوقات الصلاة يدويًا"],
+            ["🔄 استخدام توقيت حقيبة المؤمن", "📋 حالة أذكار الصلاة"],
+            ["🏠 القائمة الرئيسية"],
+        ],
+        "أذكار الصلاة",
+    )
 
 
 def governorates_keyboard() -> ReplyKeyboardMarkup:
@@ -86,7 +90,9 @@ async def handle_prayer_text(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
     if text == "✅ تفعيل أذكار الصلاة":
         context.user_data["flow"] = "prayer_choose_governorate"
-        await update.effective_message.reply_text("اختر محافظتك حتى أعتمد توقيت الصلاة الصحيح:", reply_markup=governorates_keyboard())
+        await update.effective_message.reply_text(
+            "اختر محافظتك حتى أعتمد توقيت الصلاة الصحيح:", reply_markup=governorates_keyboard()
+        )
         return True
 
     if text == "📍 تغيير المحافظة":
@@ -111,7 +117,10 @@ async def handle_prayer_text(update: Update, context: ContextTypes.DEFAULT_TYPE,
             if user:
                 clear_manual_times(user.id)
         context.user_data.pop("flow", None)
-        await update.effective_message.reply_text("تم إلغاء الضبط اليدوي. سيتم استخدام توقيت حقيبة المؤمن/التوقيت التلقائي.", reply_markup=prayer_menu_keyboard())
+        await update.effective_message.reply_text(
+            "تم إلغاء الضبط اليدوي. سيتم استخدام توقيت حقيبة المؤمن/التوقيت التلقائي.",
+            reply_markup=prayer_menu_keyboard(),
+        )
         return True
 
     if text == "❌ إلغاء تفعيل أذكار الصلاة":
@@ -122,7 +131,9 @@ async def handle_prayer_text(update: Update, context: ContextTypes.DEFAULT_TYPE,
                 setting.enabled = False
                 db.commit()
         context.user_data.pop("flow", None)
-        await update.effective_message.reply_text("تم إيقاف أذكار الصلاة لهذا الحساب.", reply_markup=main_keyboard(False))
+        await update.effective_message.reply_text(
+            "تم إيقاف أذكار الصلاة لهذا الحساب.", reply_markup=main_keyboard(False)
+        )
         return True
 
     if text == "📋 حالة أذكار الصلاة":
@@ -131,23 +142,34 @@ async def handle_prayer_text(update: Update, context: ContextTypes.DEFAULT_TYPE,
             setting = _get_or_create_setting(db, user.id) if user else None
             manual = _manual_row(db, user.id) if user else None
         if not setting or not setting.enabled:
-            await update.effective_message.reply_text("أذكار الصلاة غير مفعّلة حاليًا.", reply_markup=prayer_menu_keyboard())
+            await update.effective_message.reply_text(
+                "أذكار الصلاة غير مفعّلة حاليًا.", reply_markup=prayer_menu_keyboard()
+            )
             return True
         try:
             events = prayer_events_for_day(setting.governorate or "بغداد", user_id=user.id if user else None)
-            lines = [f"🕌 أذكار الصلاة مفعّلة — {setting.governorate}", f"نظام التوقيت: {'يدوي' if manual else 'حقيبة المؤمن/تلقائي'}", ""]
+            lines = [
+                f"🕌 أذكار الصلاة مفعّلة — {setting.governorate}",
+                f"نظام التوقيت: {'يدوي' if manual else 'حقيبة المؤمن/تلقائي'}",
+                "",
+            ]
             for key, dt in events:
-                label = {"fajr":"الصبح", "dhuhr_asr":"الظهر والعصر", "maghrib_isha":"المغرب والعشاء"}.get(key, key)
+                label = {"fajr": "الصبح", "dhuhr_asr": "الظهر والعصر", "maghrib_isha": "المغرب والعشاء"}.get(key, key)
                 lines.append(f"• {label}: {dt.strftime('%H:%M')}")
             await update.effective_message.reply_text("\n".join(lines), reply_markup=prayer_menu_keyboard())
         except Exception:
-            await update.effective_message.reply_text("أذكار الصلاة مفعّلة، لكن تعذر جلب مواقيت اليوم الآن. يمكنك ضبطها يدويًا من زر 🕘.", reply_markup=prayer_menu_keyboard())
+            await update.effective_message.reply_text(
+                "أذكار الصلاة مفعّلة، لكن تعذر جلب مواقيت اليوم الآن. يمكنك ضبطها يدويًا من زر 🕘.",
+                reply_markup=prayer_menu_keyboard(),
+            )
         return True
 
     if context.user_data.get("flow") == "prayer_manual_times":
         parsed = _parse_three_times(text)
         if not parsed:
-            await update.effective_message.reply_text("الصيغة غير صحيحة. اكتب 3 أوقات مثل: 04:12 12:05 18:40", reply_markup=prayer_menu_keyboard())
+            await update.effective_message.reply_text(
+                "الصيغة غير صحيحة. اكتب 3 أوقات مثل: 04:12 12:05 18:40", reply_markup=prayer_menu_keyboard()
+            )
             return True
         fajr, dhuhr, maghrib = parsed
         with get_session() as db:
@@ -173,7 +195,9 @@ async def handle_prayer_text(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
     if context.user_data.get("flow") == "prayer_choose_governorate":
         if text not in IRAQ_GOVERNORATES:
-            await update.effective_message.reply_text("اختر محافظة من الأزرار الظاهرة فقط.", reply_markup=governorates_keyboard())
+            await update.effective_message.reply_text(
+                "اختر محافظة من الأزرار الظاهرة فقط.", reply_markup=governorates_keyboard()
+            )
             return True
         with get_session() as db:
             user = _current_user(db, update.effective_user.id)

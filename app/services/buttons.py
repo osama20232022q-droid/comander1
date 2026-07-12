@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Iterable
-from types import SimpleNamespace
 import os
 import time
-from sqlalchemy import select, func
+from collections.abc import Iterable
+from datetime import UTC, datetime
+from types import SimpleNamespace
+
+from sqlalchemy import func, select
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.db import get_session
@@ -30,52 +31,378 @@ PROTECTED_ACTIONS = {
 # scope: main/admin/both. button_type: reply/inline
 DEFAULT_BUTTONS: list[dict] = [
     # Main menu
-    {"action_key": "subjects", "label": "📚 المواد", "scope": "main", "button_type": "reply", "row_order": 1, "col_order": 1, "style": "default"},
-    {"action_key": "study_plan", "label": "🧠 خطة دراسية معمقة", "scope": "main", "button_type": "reply", "row_order": 1, "col_order": 2, "style": "default"},
-    {"action_key": "pomodoro", "label": "⏳ البومودورو", "scope": "main", "button_type": "reply", "row_order": 2, "col_order": 1, "style": "default"},
-    {"action_key": "remaining", "label": "⌛ كم المتبقي؟", "scope": "main", "button_type": "reply", "row_order": 2, "col_order": 2, "style": "primary"},
-    {"action_key": "ai_chat", "label": "🤖 دردشة AI", "scope": "main", "button_type": "reply", "row_order": 3, "col_order": 1, "style": "primary"},
-    {"action_key": "motivate", "label": "🔥 حفزني", "scope": "main", "button_type": "reply", "row_order": 3, "col_order": 2, "style": "default"},
-    {"action_key": "prayer_reminders", "label": "🕌 أذكار الصلاة", "scope": "main", "button_type": "reply", "row_order": 4, "col_order": 1, "style": "success"},
-    {"action_key": "progress", "label": "📊 تقدمي", "scope": "main", "button_type": "reply", "row_order": 4, "col_order": 2, "style": "default"},
-    {"action_key": "certificates", "label": "🏅 شهاداتي", "scope": "main", "button_type": "reply", "row_order": 5, "col_order": 1, "style": "default"},
-    {"action_key": "profile", "label": "👤 ملفي", "scope": "main", "button_type": "reply", "row_order": 5, "col_order": 2, "style": "default"},
-    {"action_key": "inline_buttons", "label": "🔘 الأزرار الشفافة", "scope": "main", "button_type": "reply", "row_order": 6, "col_order": 1, "style": "default"},
-    {"action_key": "help", "label": "❓ ماذا يفعل هذا البوت؟", "scope": "main", "button_type": "reply", "row_order": 6, "col_order": 2, "style": "default"},
-    {"action_key": "manual_settings", "label": "⚙️ ضبط يدوي", "scope": "main", "button_type": "reply", "row_order": 7, "col_order": 1, "style": "primary"},
-    {"action_key": "admin_panel", "label": "👑 لوحة الأدمن", "scope": "admin_entry", "button_type": "reply", "row_order": 99, "col_order": 1, "style": "danger"},
-
+    {
+        "action_key": "subjects",
+        "label": "📚 المواد",
+        "scope": "main",
+        "button_type": "reply",
+        "row_order": 1,
+        "col_order": 1,
+        "style": "default",
+    },
+    {
+        "action_key": "study_plan",
+        "label": "🧠 خطة دراسية معمقة",
+        "scope": "main",
+        "button_type": "reply",
+        "row_order": 1,
+        "col_order": 2,
+        "style": "default",
+    },
+    {
+        "action_key": "pomodoro",
+        "label": "⏳ البومودورو",
+        "scope": "main",
+        "button_type": "reply",
+        "row_order": 2,
+        "col_order": 1,
+        "style": "default",
+    },
+    {
+        "action_key": "remaining",
+        "label": "⌛ كم المتبقي؟",
+        "scope": "main",
+        "button_type": "reply",
+        "row_order": 2,
+        "col_order": 2,
+        "style": "primary",
+    },
+    {
+        "action_key": "ai_chat",
+        "label": "🤖 دردشة AI",
+        "scope": "main",
+        "button_type": "reply",
+        "row_order": 3,
+        "col_order": 1,
+        "style": "primary",
+    },
+    {
+        "action_key": "motivate",
+        "label": "🔥 حفزني",
+        "scope": "main",
+        "button_type": "reply",
+        "row_order": 3,
+        "col_order": 2,
+        "style": "default",
+    },
+    {
+        "action_key": "prayer_reminders",
+        "label": "🕌 أذكار الصلاة",
+        "scope": "main",
+        "button_type": "reply",
+        "row_order": 4,
+        "col_order": 1,
+        "style": "success",
+    },
+    {
+        "action_key": "progress",
+        "label": "📊 تقدمي",
+        "scope": "main",
+        "button_type": "reply",
+        "row_order": 4,
+        "col_order": 2,
+        "style": "default",
+    },
+    {
+        "action_key": "certificates",
+        "label": "🏅 شهاداتي",
+        "scope": "main",
+        "button_type": "reply",
+        "row_order": 5,
+        "col_order": 1,
+        "style": "default",
+    },
+    {
+        "action_key": "profile",
+        "label": "👤 ملفي",
+        "scope": "main",
+        "button_type": "reply",
+        "row_order": 5,
+        "col_order": 2,
+        "style": "default",
+    },
+    {
+        "action_key": "inline_buttons",
+        "label": "🔘 الأزرار الشفافة",
+        "scope": "main",
+        "button_type": "reply",
+        "row_order": 6,
+        "col_order": 1,
+        "style": "default",
+    },
+    {
+        "action_key": "help",
+        "label": "❓ ماذا يفعل هذا البوت؟",
+        "scope": "main",
+        "button_type": "reply",
+        "row_order": 6,
+        "col_order": 2,
+        "style": "default",
+    },
+    {
+        "action_key": "manual_settings",
+        "label": "⚙️ ضبط يدوي",
+        "scope": "main",
+        "button_type": "reply",
+        "row_order": 7,
+        "col_order": 1,
+        "style": "primary",
+    },
+    {
+        "action_key": "discipline",
+        "label": "🪖 غرفة العمليات",
+        "scope": "main",
+        "button_type": "reply",
+        "row_order": 7,
+        "col_order": 2,
+        "style": "danger",
+    },
+    {
+        "action_key": "admin_panel",
+        "label": "👑 لوحة الأدمن",
+        "scope": "admin_entry",
+        "button_type": "reply",
+        "row_order": 99,
+        "col_order": 1,
+        "style": "danger",
+    },
     # Admin panel
-    {"action_key": "admin_pending", "label": "👥 طلبات التفعيل", "scope": "admin", "button_type": "reply", "row_order": 1, "col_order": 1, "style": "default"},
-    {"action_key": "admin_activate", "label": "➕ تفعيل مشترك", "scope": "admin", "button_type": "reply", "row_order": 1, "col_order": 2, "style": "success"},
-    {"action_key": "admin_stats", "label": "📊 إحصائيات النظام", "scope": "admin", "button_type": "reply", "row_order": 2, "col_order": 1, "style": "primary"},
-    {"action_key": "admin_users", "label": "📋 المستخدمون", "scope": "admin", "button_type": "reply", "row_order": 2, "col_order": 2, "style": "default"},
-    {"action_key": "admin_ban", "label": "🚫 حظر مستخدم", "scope": "admin", "button_type": "reply", "row_order": 3, "col_order": 1, "style": "danger"},
-    {"action_key": "admin_unban", "label": "✅ إلغاء الحظر", "scope": "admin", "button_type": "reply", "row_order": 3, "col_order": 2, "style": "success"},
-    {"action_key": "admin_buttons", "label": "🧩 الأزرار", "scope": "admin", "button_type": "reply", "row_order": 4, "col_order": 1, "style": "primary"},
-    {"action_key": "admin_backup", "label": "📦 نسخة احتياطية الآن", "scope": "admin", "button_type": "reply", "row_order": 4, "col_order": 2, "style": "default"},
-    {"action_key": "admin_restore_check", "label": "♻️ فحص ملف استرجاع", "scope": "admin", "button_type": "reply", "row_order": 5, "col_order": 1, "style": "default"},
-    {"action_key": "admin_db_status", "label": "☁️ حالة قاعدة البيانات", "scope": "admin", "button_type": "reply", "row_order": 5, "col_order": 2, "style": "default"},
-    {"action_key": "home", "label": "🏠 القائمة الرئيسية", "scope": "both", "button_type": "reply", "row_order": 100, "col_order": 1, "style": "default"},
-
+    {
+        "action_key": "admin_pending",
+        "label": "👥 طلبات التفعيل",
+        "scope": "admin",
+        "button_type": "reply",
+        "row_order": 1,
+        "col_order": 1,
+        "style": "default",
+    },
+    {
+        "action_key": "admin_activate",
+        "label": "➕ تفعيل مشترك",
+        "scope": "admin",
+        "button_type": "reply",
+        "row_order": 1,
+        "col_order": 2,
+        "style": "success",
+    },
+    {
+        "action_key": "admin_stats",
+        "label": "📊 إحصائيات النظام",
+        "scope": "admin",
+        "button_type": "reply",
+        "row_order": 2,
+        "col_order": 1,
+        "style": "primary",
+    },
+    {
+        "action_key": "admin_users",
+        "label": "📋 المستخدمون",
+        "scope": "admin",
+        "button_type": "reply",
+        "row_order": 2,
+        "col_order": 2,
+        "style": "default",
+    },
+    {
+        "action_key": "admin_ban",
+        "label": "🚫 حظر مستخدم",
+        "scope": "admin",
+        "button_type": "reply",
+        "row_order": 3,
+        "col_order": 1,
+        "style": "danger",
+    },
+    {
+        "action_key": "admin_unban",
+        "label": "✅ إلغاء الحظر",
+        "scope": "admin",
+        "button_type": "reply",
+        "row_order": 3,
+        "col_order": 2,
+        "style": "success",
+    },
+    {
+        "action_key": "admin_buttons",
+        "label": "🧩 الأزرار",
+        "scope": "admin",
+        "button_type": "reply",
+        "row_order": 4,
+        "col_order": 1,
+        "style": "primary",
+    },
+    {
+        "action_key": "admin_backup",
+        "label": "📦 نسخة احتياطية الآن",
+        "scope": "admin",
+        "button_type": "reply",
+        "row_order": 4,
+        "col_order": 2,
+        "style": "default",
+    },
+    {
+        "action_key": "admin_restore_check",
+        "label": "♻️ فحص ملف استرجاع",
+        "scope": "admin",
+        "button_type": "reply",
+        "row_order": 5,
+        "col_order": 1,
+        "style": "default",
+    },
+    {
+        "action_key": "admin_db_status",
+        "label": "☁️ حالة قاعدة البيانات",
+        "scope": "admin",
+        "button_type": "reply",
+        "row_order": 5,
+        "col_order": 2,
+        "style": "default",
+    },
+    {
+        "action_key": "home",
+        "label": "🏠 القائمة الرئيسية",
+        "scope": "both",
+        "button_type": "reply",
+        "row_order": 100,
+        "col_order": 1,
+        "style": "default",
+    },
     # Button manager menus
-    {"action_key": "admin_button_edit", "label": "✏️ تعديل الأزرار", "scope": "admin_buttons", "button_type": "reply", "row_order": 1, "col_order": 1, "style": "primary"},
-    {"action_key": "admin_button_colors", "label": "🎨 تعديل ألوان الأزرار", "scope": "admin_buttons", "button_type": "reply", "row_order": 1, "col_order": 2, "style": "default"},
-    {"action_key": "admin_add_keyboard", "label": "➕ زر لوحة كيبورد", "scope": "admin_buttons", "button_type": "reply", "row_order": 2, "col_order": 1, "style": "success"},
-    {"action_key": "admin_add_inline", "label": "➕ زر شفاف", "scope": "admin_buttons", "button_type": "reply", "row_order": 2, "col_order": 2, "style": "success"},
-    {"action_key": "admin_deleted_buttons", "label": "🗑️ الأزرار المحذوفة", "scope": "admin_buttons", "button_type": "reply", "row_order": 3, "col_order": 1, "style": "danger"},
-    {"action_key": "admin_button_order", "label": "↕️ ترتيب الأزرار", "scope": "admin_buttons", "button_type": "reply", "row_order": 3, "col_order": 2, "style": "primary"},
-    {"action_key": "admin_restore_defaults", "label": "🔄 استرجاع الأزرار الافتراضية", "scope": "admin_buttons", "button_type": "reply", "row_order": 4, "col_order": 1, "style": "default"},
-    {"action_key": "admin_delete_button", "label": "🗑️ حذف زر معين", "scope": "admin_button_edit", "button_type": "reply", "row_order": 1, "col_order": 1, "style": "danger"},
-    {"action_key": "admin_rename_button", "label": "✏️ إعادة تسمية زر معين", "scope": "admin_button_edit", "button_type": "reply", "row_order": 1, "col_order": 2, "style": "primary"},
-    {"action_key": "admin_add_button_from_edit", "label": "➕ إضافة زر معين", "scope": "admin_button_edit", "button_type": "reply", "row_order": 2, "col_order": 1, "style": "success"},
-    {"action_key": "admin_back_buttons", "label": "↩️ رجوع إلى الأزرار", "scope": "admin_button_edit", "button_type": "reply", "row_order": 3, "col_order": 1, "style": "default"},
-
+    {
+        "action_key": "admin_button_edit",
+        "label": "✏️ تعديل الأزرار",
+        "scope": "admin_buttons",
+        "button_type": "reply",
+        "row_order": 1,
+        "col_order": 1,
+        "style": "primary",
+    },
+    {
+        "action_key": "admin_button_colors",
+        "label": "🎨 تعديل ألوان الأزرار",
+        "scope": "admin_buttons",
+        "button_type": "reply",
+        "row_order": 1,
+        "col_order": 2,
+        "style": "default",
+    },
+    {
+        "action_key": "admin_add_keyboard",
+        "label": "➕ زر لوحة كيبورد",
+        "scope": "admin_buttons",
+        "button_type": "reply",
+        "row_order": 2,
+        "col_order": 1,
+        "style": "success",
+    },
+    {
+        "action_key": "admin_add_inline",
+        "label": "➕ زر شفاف",
+        "scope": "admin_buttons",
+        "button_type": "reply",
+        "row_order": 2,
+        "col_order": 2,
+        "style": "success",
+    },
+    {
+        "action_key": "admin_deleted_buttons",
+        "label": "🗑️ الأزرار المحذوفة",
+        "scope": "admin_buttons",
+        "button_type": "reply",
+        "row_order": 3,
+        "col_order": 1,
+        "style": "danger",
+    },
+    {
+        "action_key": "admin_button_order",
+        "label": "↕️ ترتيب الأزرار",
+        "scope": "admin_buttons",
+        "button_type": "reply",
+        "row_order": 3,
+        "col_order": 2,
+        "style": "primary",
+    },
+    {
+        "action_key": "admin_restore_defaults",
+        "label": "🔄 استرجاع الأزرار الافتراضية",
+        "scope": "admin_buttons",
+        "button_type": "reply",
+        "row_order": 4,
+        "col_order": 1,
+        "style": "default",
+    },
+    {
+        "action_key": "admin_delete_button",
+        "label": "🗑️ حذف زر معين",
+        "scope": "admin_button_edit",
+        "button_type": "reply",
+        "row_order": 1,
+        "col_order": 1,
+        "style": "danger",
+    },
+    {
+        "action_key": "admin_rename_button",
+        "label": "✏️ إعادة تسمية زر معين",
+        "scope": "admin_button_edit",
+        "button_type": "reply",
+        "row_order": 1,
+        "col_order": 2,
+        "style": "primary",
+    },
+    {
+        "action_key": "admin_add_button_from_edit",
+        "label": "➕ إضافة زر معين",
+        "scope": "admin_button_edit",
+        "button_type": "reply",
+        "row_order": 2,
+        "col_order": 1,
+        "style": "success",
+    },
+    {
+        "action_key": "admin_back_buttons",
+        "label": "↩️ رجوع إلى الأزرار",
+        "scope": "admin_button_edit",
+        "button_type": "reply",
+        "row_order": 3,
+        "col_order": 1,
+        "style": "default",
+    },
     # Profile/manual settings buttons
-    {"action_key": "profile_edit", "label": "✏️ تعديل معلوماتي", "scope": "profile", "button_type": "reply", "row_order": 1, "col_order": 1, "style": "primary"},
-    {"action_key": "routine_change", "label": "🔄 تغيير نظامي", "scope": "profile", "button_type": "reply", "row_order": 2, "col_order": 1, "style": "success"},
-    {"action_key": "habit_add", "label": "🌱 إضافة عادة", "scope": "profile", "button_type": "reply", "row_order": 2, "col_order": 2, "style": "success"},
-    {"action_key": "habits_list", "label": "📋 عاداتي", "scope": "profile", "button_type": "reply", "row_order": 3, "col_order": 1, "style": "default"},
+    {
+        "action_key": "profile_edit",
+        "label": "✏️ تعديل معلوماتي",
+        "scope": "profile",
+        "button_type": "reply",
+        "row_order": 1,
+        "col_order": 1,
+        "style": "primary",
+    },
+    {
+        "action_key": "routine_change",
+        "label": "🔄 تغيير نظامي",
+        "scope": "profile",
+        "button_type": "reply",
+        "row_order": 2,
+        "col_order": 1,
+        "style": "success",
+    },
+    {
+        "action_key": "habit_add",
+        "label": "🌱 إضافة عادة",
+        "scope": "profile",
+        "button_type": "reply",
+        "row_order": 2,
+        "col_order": 2,
+        "style": "success",
+    },
+    {
+        "action_key": "habits_list",
+        "label": "📋 عاداتي",
+        "scope": "profile",
+        "button_type": "reply",
+        "row_order": 3,
+        "col_order": 1,
+        "style": "default",
+    },
 ]
 
 
@@ -116,7 +443,11 @@ def _all_buttons_cached() -> list[SimpleNamespace]:
     if _BUTTON_CACHE is not None and now < _BUTTON_CACHE_EXPIRES:
         return list(_BUTTON_CACHE)
     with get_session() as db:
-        buttons = db.scalars(select(ButtonConfig).order_by(ButtonConfig.scope, ButtonConfig.row_order, ButtonConfig.col_order, ButtonConfig.id)).all()
+        buttons = db.scalars(
+            select(ButtonConfig).order_by(
+                ButtonConfig.scope, ButtonConfig.row_order, ButtonConfig.col_order, ButtonConfig.id
+            )
+        ).all()
         _BUTTON_CACHE = [_snapshot_button(b) for b in buttons]
         _BUTTON_CACHE_EXPIRES = now + _BUTTON_CACHE_TTL
         return list(_BUTTON_CACHE)
@@ -150,7 +481,7 @@ def _strip_color_prefix(text: str) -> str:
     t = text.strip()
     for prefix in ["🔵 ", "🟢 ", "🔴 ", "⚪ "]:
         if t.startswith(prefix):
-            return t[len(prefix):].strip()
+            return t[len(prefix) :].strip()
     return t
 
 
@@ -194,7 +525,11 @@ def buttons_for_scope(scope: str, include_admin_entry: bool = False) -> list[But
     if include_admin_entry:
         scopes.add("admin_entry")
     return sorted(
-        [b for b in _all_buttons_cached() if b.visible and b.deleted_at is None and b.button_type == "reply" and b.scope in scopes],
+        [
+            b
+            for b in _all_buttons_cached()
+            if b.visible and b.deleted_at is None and b.button_type == "reply" and b.scope in scopes
+        ],
         key=lambda b: (b.row_order, b.col_order, b.id),
     )
 
@@ -216,7 +551,7 @@ def all_visible_buttons() -> list[ButtonConfig]:
 def deleted_buttons() -> list[ButtonConfig]:
     return sorted(
         [b for b in _all_buttons_cached() if b.deleted_at is not None],
-        key=lambda b: b.deleted_at or datetime.min.replace(tzinfo=timezone.utc),
+        key=lambda b: b.deleted_at or datetime.min.replace(tzinfo=UTC),
         reverse=True,
     )
 
@@ -244,7 +579,7 @@ def delete_button(action_key: str) -> tuple[bool, str]:
         if not b:
             return False, "الزر غير موجود."
         b.visible = False
-        b.deleted_at = datetime.now(timezone.utc)
+        b.deleted_at = datetime.now(UTC)
         db.commit()
         invalidate_buttons_cache()
     return True, "تم حذف/إخفاء الزر. تستطيع استرجاعه من الأزرار المحذوفة."
@@ -297,21 +632,30 @@ def add_custom_button(label: str, response_text: str, button_type: str = "reply"
     if button_type not in ["reply", "inline"]:
         return False, "نوع الزر غير مدعوم."
     with get_session() as db:
-        max_row = db.scalar(select(func.max(ButtonConfig.row_order)).where(ButtonConfig.scope == "main", ButtonConfig.button_type == "reply")) or 5
-        key = f"custom:{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+        max_row = (
+            db.scalar(
+                select(func.max(ButtonConfig.row_order)).where(
+                    ButtonConfig.scope == "main", ButtonConfig.button_type == "reply"
+                )
+            )
+            or 5
+        )
+        key = f"custom:{int(datetime.now(UTC).timestamp() * 1000)}"
         scope = "main"
         row = max_row + 1 if button_type == "reply" else 1
-        db.add(ButtonConfig(
-            action_key=key,
-            label=label,
-            scope=scope,
-            button_type=button_type,
-            row_order=row,
-            col_order=1,
-            style="default",
-            response_text=response_text,
-            visible=True,
-        ))
+        db.add(
+            ButtonConfig(
+                action_key=key,
+                label=label,
+                scope=scope,
+                button_type=button_type,
+                row_order=row,
+                col_order=1,
+                style="default",
+                response_text=response_text,
+                visible=True,
+            )
+        )
         db.commit()
         invalidate_buttons_cache()
     return True, "تمت إضافة الزر."
@@ -325,11 +669,9 @@ def buttons_for_exact_scope(scope: str, reply_only: bool = True) -> list[ButtonC
     """
     return sorted(
         [
-            b for b in _all_buttons_cached()
-            if b.visible
-            and b.deleted_at is None
-            and b.scope == scope
-            and (not reply_only or b.button_type == "reply")
+            b
+            for b in _all_buttons_cached()
+            if b.visible and b.deleted_at is None and b.scope == scope and (not reply_only or b.button_type == "reply")
         ],
         key=lambda b: (b.row_order, b.col_order, b.id),
     )
@@ -353,7 +695,14 @@ def set_button_position(action_key: str, row_order: int, col_order: int) -> tupl
 
 def inline_custom_keyboard() -> InlineKeyboardMarkup | None:
     buttons = sorted(
-        [b for b in _all_buttons_cached() if b.visible and b.deleted_at is None and b.button_type == "inline" and str(b.action_key).startswith("custom:")],
+        [
+            b
+            for b in _all_buttons_cached()
+            if b.visible
+            and b.deleted_at is None
+            and b.button_type == "inline"
+            and str(b.action_key).startswith("custom:")
+        ],
         key=lambda b: b.id,
     )
     if not buttons:
